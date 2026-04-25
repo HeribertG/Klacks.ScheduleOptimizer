@@ -1,0 +1,134 @@
+[
+  {
+    "id": "sched-small-001",
+    "description": "Small: 10 agents, 50 shifts, mixed FD/SD/ND",
+    "agentCount": 10,
+    "shiftCount": 50,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Spaetdienst", "startTime": "15:00", "endTime": "23:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Nachtdienst", "startTime": "23:00", "endTime": "07:00", "hours": 8, "ratio": 0.5, "priority": 2 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 170,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2
+    },
+    "expectations": {
+      "minCoverage": 0.90,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 10,
+      "maxTimeMs": 5000
+    },
+    "tags": ["small", "baseline"],
+    "priority": "high"
+  },
+  {
+    "id": "sched-medium-001",
+    "description": "Medium: 50 agents, 500 shifts, mixed FD/SD/ND",
+    "agentCount": 50,
+    "shiftCount": 500,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Spaetdienst", "startTime": "15:00", "endTime": "23:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Nachtdienst", "startTime": "23:00", "endTime": "07:00", "hours": 8, "ratio": 0.5, "priority": 2 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 170,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2
+    },
+    "expectations": {
+      "minCoverage": 0.80,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 50,
+      "maxTimeMs": 15000
+    },
+    "tags": ["medium", "realistic"],
+    "priority": "high"
+  },
+  {
+    "id": "sched-medium-002",
+    "description": "Medium: 50 agents, 300 shifts, only FD (single shift type)",
+    "agentCount": 50,
+    "shiftCount": 300,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 170,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2
+    },
+    "expectations": {
+      "minCoverage": 0.90,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 20,
+      "maxTimeMs": 10000
+    },
+    "tags": ["medium", "single-type"],
+    "priority": "medium"
+  },
+  {
+    "id": "sched-large-001",
+    "description": "Large: 200 agents, 2000 shifts, mixed FD/SD/ND",
+    "agentCount": 200,
+    "shiftCount": 2000,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Spaetdienst", "startTime": "15:00", "endTime": "23:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Nachtdienst", "startTime": "23:00", "endTime": "07:00", "hours": 8, "ratio": 0.5, "priority": 2 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 170,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2
+    },
+    "expectations": {
+      "minCoverage": 0.70,
+      "maxHardViolations": 5,
+      "maxSoftViolations": 200,
+      "maxTimeMs": 30000
+    },
+    "tags": ["large", "stress-test"],
+    "priority": "medium"
+  },
+  {
+    "id": "sched-tight-001",
+    "description": "Tight: 5 agents, 100 shifts — constrained (not enough staff)",
+    "agentCount": 5,
+    "shiftCount": 100,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Spaetdienst", "startTime": "15:00", "endTime": "23:00", "hours": 8, "ratio": 1.0, "priority": 1 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 170,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2
+    },
+    "expectations": {
+      "minCoverage": 0.50,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 30,
+      "maxTimeMs": 10000
+    },
+    "tags": ["tight", "understaffed"],
+    "priority": "high"
+  }
+]

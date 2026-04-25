@@ -1,0 +1,5 @@
+{
+  "timeLimitMs": 15000,
+  "maxIterations": 20,
+  "regressionThreshold": 0.005
+}
