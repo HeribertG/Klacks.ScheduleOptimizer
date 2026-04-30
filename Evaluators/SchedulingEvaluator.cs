@@ -1,24 +1,29 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
 /// <summary>
-/// Evaluates scheduling stories against the evolution algorithm and calculates composite scores.
-/// Analogous to Tier1Evaluator in SkillOptimizer — measures coverage, fairness, compliance, speed.
+/// Evaluates scheduling stories against the token-based evolution loop and calculates composite scores.
+/// Score-mapping (token-engine outputs → autoresearch metrics):
+///   - Coverage = assignedTokens / requiredAssignmentsTotal
+///   - Fairness = 1 - sigma(perAgentHourRatios) reproducing the legacy fairness measure
+///   - Compliance = 1 - clamp(stage0HardViolations / max(1, shifts + agents))
+///   - Speed = 1 - elapsedMs / story.MaxTimeMs
 /// </summary>
-/// <param name="config">Evolution config to use for all runs</param>
-/// <param name="penaltyWeights">Penalty weights for fitness calculation</param>
+/// <param name="config">Token-evolution config to use for all runs</param>
 
+using System.Diagnostics;
 using System.Text.Json;
-using Klacks.ScheduleOptimizer.Engine;
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution;
 
 namespace Klacks.ScheduleOptimizer.Evaluators;
 
 public class SchedulingEvaluator
 {
+    private static readonly TokenEvolutionLoop SharedLoop = TokenEvolutionLoop.Create();
+
     public static List<StoryResult> EvaluateAll(
         List<Story> stories,
-        CoreConfig config,
-        CorePenaltyWeights penaltyWeights,
+        TokenEvolutionConfig config,
         Action<string>? onProgress = null)
     {
         var results = new List<StoryResult>();
@@ -26,69 +31,58 @@ public class SchedulingEvaluator
         foreach (var story in stories)
         {
             onProgress?.Invoke($"Running story: {story.Id}");
-            var result = EvaluateStory(story, config, penaltyWeights);
+            var result = EvaluateStory(story, config);
             results.Add(result);
         }
 
         return results;
     }
 
-    public static StoryResult EvaluateStory(
-        Story story,
-        CoreConfig config,
-        CorePenaltyWeights penaltyWeights)
+    public static StoryResult EvaluateStory(Story story, TokenEvolutionConfig config)
     {
-        var (shifts, agents) = ScenarioGenerator.Generate(story, seed: 42);
+        var context = ScenarioGenerator.Generate(story, seed: 42);
 
-        var evolutionResult = EvolutionCore.RunEvolution(shifts, agents, config, penaltyWeights);
+        var sw = Stopwatch.StartNew();
+        var scenario = SharedLoop.Run(context, config);
+        sw.Stop();
 
-        var hardViolations = ConstraintEngine.EvaluateHardViolations(evolutionResult.Assignments, shifts, agents);
-        var softViolations = ConstraintEngine.EvaluateSoftViolations(evolutionResult.Assignments, shifts, agents);
+        var requiredAssignments = Math.Max(1, context.Shifts.Sum(s => s.RequiredAssignments));
+        var coverage = Math.Min(1.0, scenario.Tokens.Count / (double)requiredAssignments);
+        var fairness = ComputeFairness(scenario, context);
 
-        var fairness = EvolutionCore.CalculateFairness(
-            new CoreScenario { Assignments = evolutionResult.Assignments },
-            agents);
-
-        var totalViolations = hardViolations.Count + softViolations.Count;
-        var maxExpectedViolations = Math.Max(1, shifts.Count + agents.Count);
-        var compliance = Math.Max(0, 1.0 - (double)totalViolations / maxExpectedViolations);
+        var hardViolations = scenario.FitnessStage0;
+        var maxExpectedViolations = Math.Max(1, context.Shifts.Count + context.Agents.Count);
+        var compliance = Math.Max(0, 1.0 - hardViolations / (double)maxExpectedViolations);
 
         var speed = story.Expectations.MaxTimeMs > 0
-            ? Math.Max(0, 1.0 - (double)evolutionResult.TimeElapsedMs / story.Expectations.MaxTimeMs)
+            ? Math.Max(0, 1.0 - sw.ElapsedMilliseconds / (double)story.Expectations.MaxTimeMs)
             : 1.0;
 
         var score = new SchedulingScore
         {
-            Coverage = evolutionResult.Coverage,
+            Coverage = coverage,
             Fairness = fairness,
             Compliance = compliance,
-            Speed = Math.Max(0, speed)
+            Speed = speed
         };
 
-        var passed = evolutionResult.Coverage >= story.Expectations.MinCoverage
-            && hardViolations.Count <= story.Expectations.MaxHardViolations
-            && evolutionResult.TimeElapsedMs <= story.Expectations.MaxTimeMs;
-
-        var violationBreakdown = new Dictionary<string, int>();
-        foreach (var v in hardViolations)
-        {
-            var key = ExtractViolationType(v.Description);
-            violationBreakdown[key] = violationBreakdown.GetValueOrDefault(key) + 1;
-        }
+        var passed = coverage >= story.Expectations.MinCoverage
+            && hardViolations <= story.Expectations.MaxHardViolations
+            && sw.ElapsedMilliseconds <= story.Expectations.MaxTimeMs;
 
         return new StoryResult
         {
             StoryId = story.Id,
             Passed = passed,
             Score = score,
-            Coverage = evolutionResult.Coverage,
-            HardViolations = hardViolations.Count,
-            SoftViolations = softViolations.Count,
+            Coverage = coverage,
+            HardViolations = hardViolations,
+            SoftViolations = 0,
             Fairness = fairness,
-            FinalGeneration = evolutionResult.FinalGeneration,
-            StopReason = evolutionResult.StopReason,
-            TimeElapsedMs = evolutionResult.TimeElapsedMs,
-            ViolationBreakdown = violationBreakdown
+            FinalGeneration = 0,
+            StopReason = string.Empty,
+            TimeElapsedMs = sw.ElapsedMilliseconds,
+            ViolationBreakdown = []
         };
     }
 
@@ -106,14 +100,37 @@ public class SchedulingEvaluator
         };
     }
 
-    private static string ExtractViolationType(string description)
+    private static double ComputeFairness(CoreScenario scenario, CoreWizardContext context)
     {
-        if (description.Contains("exceeds") && description.Contains("h on")) return "DailyHours";
-        if (description.Contains("exceeds") && description.Contains("week")) return "WeeklyHours";
-        if (description.Contains("consecutive")) return "ConsecutiveDays";
-        if (description.Contains("double-booked")) return "TimeOverlap";
-        if (description.Contains("rest period")) return "RestPeriod";
-        return "Unknown";
+        if (context.Agents.Count == 0)
+        {
+            return 1.0;
+        }
+
+        var hoursByAgent = scenario.Tokens
+            .GroupBy(t => t.AgentId)
+            .ToDictionary(g => g.Key, g => g.Sum(t => (double)t.TotalHours));
+
+        var ratios = new List<double>();
+        foreach (var agent in context.Agents)
+        {
+            var target = agent.GuaranteedHours > 0 ? agent.GuaranteedHours : agent.MaxWeeklyHours * 4;
+            if (target <= 0)
+            {
+                continue;
+            }
+            var hours = hoursByAgent.GetValueOrDefault(agent.Id, 0);
+            ratios.Add(Math.Min(1, hours / target));
+        }
+
+        if (ratios.Count == 0)
+        {
+            return 1.0;
+        }
+
+        var mean = ratios.Average();
+        var variance = ratios.Sum(r => Math.Pow(r - mean, 2)) / ratios.Count;
+        return 1.0 - Math.Min(1.0, Math.Sqrt(variance));
     }
 
     public static List<Story> LoadStories(string path)

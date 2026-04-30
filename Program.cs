@@ -9,10 +9,10 @@
 using CommandLine;
 using Spectre.Console;
 using Klacks.ScheduleOptimizer.Config;
-using Klacks.ScheduleOptimizer.Engine;
 using Klacks.ScheduleOptimizer.Evaluators;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.Optimizers;
+using Klacks.ScheduleOptimizer.TokenEvolution;
 using System.Text.Json;
 
 namespace Klacks.ScheduleOptimizer;
@@ -60,13 +60,12 @@ public class Program
         var stories = LoadStories(opts.StoriesPath, opts.Tag);
         if (stories.Count == 0) { AnsiConsole.MarkupLine("[red]No stories found.[/]"); return 1; }
 
-        var config = new CoreConfig { RandomSeed = 42 };
-        var weights = new CorePenaltyWeights();
+        var config = new TokenEvolutionConfig { RandomSeed = 42 };
 
         AnsiConsole.MarkupLine($"[blue]Evaluating {stories.Count} stories with default parameters...[/]");
         AnsiConsole.WriteLine();
 
-        var results = SchedulingEvaluator.EvaluateAll(stories, config, weights,
+        var results = SchedulingEvaluator.EvaluateAll(stories, config,
             msg => AnsiConsole.MarkupLine($"[grey]  {Markup.Escape(msg)}[/]"));
 
         PrintResultsTable(results);

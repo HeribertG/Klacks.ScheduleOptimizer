@@ -1,8 +1,9 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
 /// <summary>
-/// Generates reproducible test data (agents and shifts) from Story definitions.
-/// Uses seeded RNG for deterministic scenarios across runs.
+/// Generates reproducible test data (CoreWizardContext) from Story definitions for the token-based engine.
+/// Uses seeded RNG for deterministic scenarios across runs and Guid-based IDs so the auction/repair
+/// stages can correctly identify shifts (TokenConstraintChecker filters Guid.Empty out as invalid).
 /// </summary>
 /// <param name="story">Story definition with agent/shift counts and config</param>
 
@@ -15,12 +16,27 @@ public static class ScenarioGenerator
     private const int DAYS_IN_MONTH = 28;
     private const string BASE_DATE = "2026-04-01";
 
-    public static (List<CoreShift> Shifts, List<CoreAgent> Agents) Generate(Story story, int seed = 42)
+    public static CoreWizardContext Generate(Story story, int seed = 42)
     {
         var rng = new Random(seed);
         var agents = GenerateAgents(story, rng);
         var shifts = GenerateShifts(story, rng);
-        return (shifts, agents);
+        var periodFrom = DateOnly.Parse(BASE_DATE);
+        var periodUntil = periodFrom.AddDays(DAYS_IN_MONTH - 1);
+
+        var cfg = story.AgentConfig;
+        return new CoreWizardContext
+        {
+            PeriodFrom = periodFrom,
+            PeriodUntil = periodUntil,
+            Agents = agents,
+            Shifts = shifts,
+            SchedulingMaxConsecutiveDays = cfg.MaxConsecutiveDays,
+            SchedulingMinPauseHours = cfg.MinRestHours,
+            SchedulingMaxOptimalGap = cfg.MaxOptimalGap,
+            SchedulingMaxDailyHours = cfg.MaxDailyHours,
+            SchedulingMaxWeeklyHours = cfg.MaxWeeklyHours,
+        };
     }
 
     private static List<CoreAgent> GenerateAgents(Story story, Random rng)
@@ -68,7 +84,7 @@ public static class ScenarioGenerator
                 for (var j = 0; j < count && generated < story.ShiftCount; j++)
                 {
                     shifts.Add(new CoreShift(
-                        Id: $"shift_{generated:D5}",
+                        Id: Guid.NewGuid().ToString(),
                         Name: st.Name,
                         Date: date,
                         StartTime: st.StartTime,
