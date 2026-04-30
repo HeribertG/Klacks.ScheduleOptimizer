@@ -245,7 +245,6 @@ public sealed class TokenEvolutionLoop
         return new CoreScenario
         {
             Id = Guid.NewGuid().ToString(),
-            Assignments = source.Assignments.ToList(),
             Tokens = source.Tokens.ToList(),
             FitnessStage0 = source.FitnessStage0,
             FitnessStage1 = source.FitnessStage1,

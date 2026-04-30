@@ -211,5 +211,85 @@
     },
     "tags": ["fairness", "heterogeneous"],
     "priority": "medium"
+  },
+  {
+    "id": "sched-breakblocker-001",
+    "description": "Break-Blocker: 15 agents (20% on vacation week 1), 80 FD shifts — blocked agents must not be assigned",
+    "agentCount": 15,
+    "shiftCount": 80,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 150,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2,
+      "breakBlockerRatio": 0.20,
+      "breakBlockerDays": 7
+    },
+    "expectations": {
+      "minCoverage": 0.85,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 15,
+      "maxTimeMs": 8000
+    },
+    "tags": ["break-blocker", "constraint", "small"],
+    "priority": "high"
+  },
+  {
+    "id": "sched-multishift-001",
+    "description": "Multi-Shift: 12 agents, 84 shifts (FD+SD+ND per day), MinRestHours=12 must prevent ND→FD next morning",
+    "agentCount": 12,
+    "shiftCount": 84,
+    "shiftTypes": [
+      { "name": "Fruehdienst",  "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Spaetdienst",  "startTime": "15:00", "endTime": "23:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Nachtdienst",  "startTime": "23:00", "endTime": "07:00", "hours": 8, "ratio": 1.0, "priority": 2 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 140,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 48,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2
+    },
+    "expectations": {
+      "minCoverage": 0.80,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 20,
+      "maxTimeMs": 10000
+    },
+    "tags": ["multi-shift", "night", "constraint", "small"],
+    "priority": "high"
+  },
+  {
+    "id": "sched-locked-001",
+    "description": "Locked-Work: 15 agents, 90 FD shifts — 20% pre-locked, engine must preserve them and fill the rest",
+    "agentCount": 15,
+    "shiftCount": 90,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 150,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2,
+      "lockedWorkRatio": 0.20
+    },
+    "expectations": {
+      "minCoverage": 0.85,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 15,
+      "maxTimeMs": 8000
+    },
+    "tags": ["locked-work", "constraint", "small"],
+    "priority": "high"
   }
 ]

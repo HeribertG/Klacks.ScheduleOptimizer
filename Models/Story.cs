@@ -94,6 +94,18 @@ public class AgentConfig
     /// <summary>Multiplier range for GuaranteedHours variation. Default (0.8..1.2). Range (low..high).</summary>
     [JsonPropertyName("guaranteedHoursSpread")]
     public double GuaranteedHoursSpread { get; set; } = 0.4;
+
+    /// <summary>Fraction of agents that receive a break blocker (vacation/sick) for the first breakBlockerDays days.</summary>
+    [JsonPropertyName("breakBlockerRatio")]
+    public double BreakBlockerRatio { get; set; } = 0.0;
+
+    /// <summary>Number of consecutive days blocked at the start of the period for each break-blocked agent.</summary>
+    [JsonPropertyName("breakBlockerDays")]
+    public int BreakBlockerDays { get; set; } = 7;
+
+    /// <summary>Fraction of generated shifts that are pre-locked (already assigned, must not be mutated).</summary>
+    [JsonPropertyName("lockedWorkRatio")]
+    public double LockedWorkRatio { get; set; } = 0.0;
 }
 
 public class StoryExpectations

@@ -51,7 +51,6 @@ public sealed class TokenSwapMutation : ITokenOperator
         return new CoreScenario
         {
             Id = Guid.NewGuid().ToString(),
-            Assignments = source.Assignments.ToList(),
             Tokens = tokens,
         };
     }

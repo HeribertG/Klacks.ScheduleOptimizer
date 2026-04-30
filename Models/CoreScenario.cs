@@ -1,7 +1,7 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
 /// <summary>
-/// A complete scheduling solution. Holds tokens (new genome) plus the legacy assignment list for backward compatibility.
+/// A complete scheduling solution (token-based genome).
 /// Fitness is broken down into 5 lexicographically ordered stages.
 /// </summary>
 
@@ -11,18 +11,10 @@ public class CoreScenario
 {
     public string Id { get; set; } = string.Empty;
 
-    /// <summary>Legacy flat assignment list (pre token-rewrite).</summary>
-    public List<CoreAssignment> Assignments { get; set; } = [];
-
-    /// <summary>Token-based genome (new representation).</summary>
     public List<CoreToken> Tokens { get; set; } = [];
 
-    /// <summary>Aggregate fitness used by old optimizer paths.</summary>
+    /// <summary>Aggregate fitness (stage-weighted sum, used for telemetry).</summary>
     public double Fitness { get; set; }
-
-    public double Coverage { get; set; }
-
-    public double PenaltyScore { get; set; }
 
     public int HardViolations { get; set; }
 

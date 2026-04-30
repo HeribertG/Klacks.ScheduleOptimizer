@@ -25,18 +25,111 @@ public static class ScenarioGenerator
         var periodUntil = periodFrom.AddDays(DAYS_IN_MONTH - 1);
 
         var cfg = story.AgentConfig;
+        var breakBlockers = GenerateBreakBlockers(agents, cfg, periodFrom);
+        var lockedWorks = GenerateLockedWorks(agents, shifts, cfg, rng);
+
+        var lockedShiftIds = new HashSet<string>(lockedWorks.Select(lw => lw.ShiftRefId.ToString()));
+        var openShifts = shifts.Where(s => !lockedShiftIds.Contains(s.Id)).ToList();
+
         return new CoreWizardContext
         {
             PeriodFrom = periodFrom,
             PeriodUntil = periodUntil,
             Agents = agents,
-            Shifts = shifts,
+            Shifts = openShifts,
             SchedulingMaxConsecutiveDays = cfg.MaxConsecutiveDays,
             SchedulingMinPauseHours = cfg.MinRestHours,
             SchedulingMaxOptimalGap = cfg.MaxOptimalGap,
             SchedulingMaxDailyHours = cfg.MaxDailyHours,
             SchedulingMaxWeeklyHours = cfg.MaxWeeklyHours,
+            BreakBlockers = breakBlockers,
+            LockedWorks = lockedWorks,
         };
+    }
+
+    private static IReadOnlyList<CoreBreakBlocker> GenerateBreakBlockers(
+        List<CoreAgent> agents, AgentConfig cfg, DateOnly periodFrom)
+    {
+        if (cfg.BreakBlockerRatio <= 0 || cfg.BreakBlockerDays <= 0)
+        {
+            return [];
+        }
+
+        var blockedCount = (int)Math.Round(agents.Count * cfg.BreakBlockerRatio);
+        var blockers = new List<CoreBreakBlocker>(blockedCount);
+        var until = periodFrom.AddDays(cfg.BreakBlockerDays - 1);
+
+        for (var i = 0; i < blockedCount && i < agents.Count; i++)
+        {
+            blockers.Add(new CoreBreakBlocker(agents[i].Id, periodFrom, until, "Vacation"));
+        }
+
+        return blockers;
+    }
+
+    private static IReadOnlyList<CoreLockedWork> GenerateLockedWorks(
+        List<CoreAgent> agents, List<CoreShift> shifts, AgentConfig cfg, Random rng)
+    {
+        if (cfg.LockedWorkRatio <= 0 || agents.Count == 0 || shifts.Count == 0)
+        {
+            return [];
+        }
+
+        var lockedCount = (int)Math.Round(shifts.Count * cfg.LockedWorkRatio);
+        var lockedWorks = new List<CoreLockedWork>(lockedCount);
+        var shuffledShifts = shifts.OrderBy(_ => rng.NextDouble()).ToList();
+        var assignedDaysByAgent = new Dictionary<string, HashSet<DateOnly>>();
+
+        var agentIndex = 0;
+        foreach (var shift in shuffledShifts)
+        {
+            if (lockedWorks.Count >= lockedCount)
+            {
+                break;
+            }
+
+            if (!DateOnly.TryParse(shift.Date, out var date) || !Guid.TryParse(shift.Id, out var shiftRefId))
+            {
+                continue;
+            }
+
+            var startAt = date.ToDateTime(TimeOnly.Parse(shift.StartTime));
+            var endParts = shift.EndTime.Split(':');
+            var endHour = int.Parse(endParts[0]);
+            var endMinute = int.Parse(endParts[1]);
+            var startHour = int.Parse(shift.StartTime.Split(':')[0]);
+            var endAt = endHour < startHour
+                ? date.AddDays(1).ToDateTime(new TimeOnly(endHour, endMinute))
+                : date.ToDateTime(new TimeOnly(endHour, endMinute));
+
+            for (var attempt = 0; attempt < agents.Count; attempt++)
+            {
+                var agent = agents[(agentIndex + attempt) % agents.Count];
+                var agentDays = assignedDaysByAgent.GetValueOrDefault(agent.Id) ?? [];
+                if (agentDays.Contains(date))
+                {
+                    continue;
+                }
+
+                agentDays.Add(date);
+                assignedDaysByAgent[agent.Id] = agentDays;
+                agentIndex = (agentIndex + attempt + 1) % agents.Count;
+
+                lockedWorks.Add(new CoreLockedWork(
+                    WorkId: Guid.NewGuid().ToString(),
+                    AgentId: agent.Id,
+                    Date: date,
+                    ShiftTypeIndex: 0,
+                    TotalHours: (decimal)shift.Hours,
+                    StartAt: startAt,
+                    EndAt: endAt,
+                    ShiftRefId: shiftRefId,
+                    LocationContext: null));
+                break;
+            }
+        }
+
+        return lockedWorks;
     }
 
     private static List<CoreAgent> GenerateAgents(Story story, Random rng)
