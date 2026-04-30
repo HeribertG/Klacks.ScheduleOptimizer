@@ -2,6 +2,7 @@
 
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
+using Klacks.ScheduleOptimizer.TokenEvolution;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 
@@ -42,15 +43,23 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         _agentsInPriorityOrder = agentsInPriorityOrder.Select(a => a.Id).ToList();
     }
 
-    public static TokenFitnessEvaluator Create(CoreWizardContext context)
+    public static TokenFitnessEvaluator Create(CoreWizardContext context, TokenEvolutionConfig? config = null)
     {
+        var cfg = config ?? new TokenEvolutionConfig();
         var checker = new TokenConstraintChecker();
         var maxPossible = new MaxPossibleCalculator().ComputeForAll(context);
         var priorityOrder = context.Agents
             .OrderByDescending(a => a.FullTime)
             .ThenByDescending(a => a.FullTime - a.CurrentHours)
             .ToList();
-        return new TokenFitnessEvaluator(checker, maxPossible, priorityOrder);
+        return new TokenFitnessEvaluator(checker, maxPossible, priorityOrder)
+        {
+            Stage2Decay = cfg.FitnessStage2Decay,
+            Stage3BlockOrderWeight = cfg.FitnessStage3BlockOrder,
+            Stage3BlacklistWeight = cfg.FitnessStage3Blacklist,
+            Stage3LocationWeight = cfg.FitnessStage3Location,
+            Stage3MaxGapWeight = cfg.FitnessStage3MaxGap,
+        };
     }
 
     public void Evaluate(CoreScenario scenario, CoreWizardContext context)
@@ -126,13 +135,11 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         {
             if (!agentLookup.TryGetValue(agentId, out var agent))
             {
-                flags.Add(1);
                 continue;
             }
 
             if (agent.GuaranteedHours <= 0)
             {
-                flags.Add(1);
                 continue;
             }
 

@@ -43,20 +43,30 @@ public static class ScenarioGenerator
     {
         var agents = new List<CoreAgent>();
         var cfg = story.AgentConfig;
+        var fdOnlyCount = (int)Math.Round(story.AgentCount * cfg.FdOnlyRatio);
+        var maxHoursCapCount = (int)Math.Round(story.AgentCount * cfg.MaxHoursCapRatio);
+        var halfSpread = cfg.GuaranteedHoursSpread / 2.0;
 
         for (var i = 0; i < story.AgentCount; i++)
         {
-            var hoursVariation = 0.8 + rng.NextDouble() * 0.4;
+            var hoursVariation = (1.0 - halfSpread) + rng.NextDouble() * cfg.GuaranteedHoursSpread;
+            var guaranteedHours = cfg.GuaranteedHours * hoursVariation;
+            var isFdOnly = i < fdOnlyCount;
+            var hasMaxHoursCap = i < maxHoursCapCount;
             agents.Add(new CoreAgent(
                 Id: $"agent_{i:D4}",
                 CurrentHours: 0,
-                GuaranteedHours: cfg.GuaranteedHours * hoursVariation,
+                GuaranteedHours: guaranteedHours,
                 MaxConsecutiveDays: cfg.MaxConsecutiveDays,
                 MinRestHours: cfg.MinRestHours,
                 Motivation: 0.3 + rng.NextDouble() * 0.7,
                 MaxDailyHours: cfg.MaxDailyHours,
                 MaxWeeklyHours: cfg.MaxWeeklyHours,
-                MaxOptimalGap: cfg.MaxOptimalGap));
+                MaxOptimalGap: cfg.MaxOptimalGap)
+            {
+                PerformsShiftWork = !isFdOnly,
+                MaximumHours = hasMaxHoursCap ? guaranteedHours * 1.2 : 0,
+            });
         }
 
         return agents;

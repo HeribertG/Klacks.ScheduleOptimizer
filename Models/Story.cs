@@ -82,6 +82,18 @@ public class AgentConfig
 
     [JsonPropertyName("maxOptimalGap")]
     public double MaxOptimalGap { get; set; } = 2;
+
+    /// <summary>Fraction of agents that are FD-only (PerformsShiftWork=false, shiftTypeIndex must be 0).</summary>
+    [JsonPropertyName("fdOnlyRatio")]
+    public double FdOnlyRatio { get; set; } = 0.0;
+
+    /// <summary>Fraction of agents that have MaximumHours set to GuaranteedHours * 1.2 (period cap).</summary>
+    [JsonPropertyName("maxHoursCapRatio")]
+    public double MaxHoursCapRatio { get; set; } = 0.0;
+
+    /// <summary>Multiplier range for GuaranteedHours variation. Default (0.8..1.2). Range (low..high).</summary>
+    [JsonPropertyName("guaranteedHoursSpread")]
+    public double GuaranteedHoursSpread { get; set; } = 0.4;
 }
 
 public class StoryExpectations

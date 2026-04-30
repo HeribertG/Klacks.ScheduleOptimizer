@@ -32,6 +32,11 @@ public class ParameterOptimizer
         new("mutMerge",         0.05,  0.5, 0.05, c => c.MutationWeightMerge,               (c, v) => c with { MutationWeightMerge = v }),
         new("mutReassign",      0.05,  0.5, 0.05, c => c.MutationWeightReassign,            (c, v) => c with { MutationWeightReassign = v }),
         new("mutRepair",        0.05,  0.5, 0.05, c => c.MutationWeightRepair,              (c, v) => c with { MutationWeightRepair = v }),
+        new("stage2Decay",      0.3,  0.95, 0.1,  c => c.FitnessStage2Decay,                (c, v) => c with { FitnessStage2Decay = v }),
+        new("stage3BlockOrder", 0.05,  0.7, 0.05, c => c.FitnessStage3BlockOrder,           (c, v) => c with { FitnessStage3BlockOrder = v }),
+        new("stage3Blacklist",  0.05,  0.6, 0.05, c => c.FitnessStage3Blacklist,            (c, v) => c with { FitnessStage3Blacklist = v }),
+        new("stage3Location",   0.05,  0.5, 0.05, c => c.FitnessStage3Location,             (c, v) => c with { FitnessStage3Location = v }),
+        new("stage3MaxGap",     0.05,  0.4, 0.05, c => c.FitnessStage3MaxGap,               (c, v) => c with { FitnessStage3MaxGap = v }),
     ];
 
     public OptimizationReport Optimize(

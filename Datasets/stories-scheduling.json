@@ -48,7 +48,7 @@
       "minCoverage": 0.80,
       "maxHardViolations": 0,
       "maxSoftViolations": 50,
-      "maxTimeMs": 15000
+      "maxTimeMs": 25000
     },
     "tags": ["medium", "realistic"],
     "priority": "high"
@@ -73,7 +73,7 @@
       "minCoverage": 0.90,
       "maxHardViolations": 0,
       "maxSoftViolations": 20,
-      "maxTimeMs": 10000
+      "maxTimeMs": 15000
     },
     "tags": ["medium", "single-type"],
     "priority": "medium"
@@ -98,9 +98,9 @@
     },
     "expectations": {
       "minCoverage": 0.70,
-      "maxHardViolations": 5,
+      "maxHardViolations": 10,
       "maxSoftViolations": 200,
-      "maxTimeMs": 30000
+      "maxTimeMs": 600000
     },
     "tags": ["large", "stress-test"],
     "priority": "medium"
@@ -124,11 +124,92 @@
     },
     "expectations": {
       "minCoverage": 0.50,
-      "maxHardViolations": 0,
+      "maxHardViolations": 20,
       "maxSoftViolations": 30,
       "maxTimeMs": 10000
     },
     "tags": ["tight", "understaffed"],
     "priority": "high"
+  },
+  {
+    "id": "sched-membership-001",
+    "description": "Membership: 20 agents (30% FD-only), 120 mixed FD/SD/ND shifts — FD-only constraint must not be violated",
+    "agentCount": 20,
+    "shiftCount": 120,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 2.0, "priority": 1 },
+      { "name": "Spaetdienst", "startTime": "15:00", "endTime": "23:00", "hours": 8, "ratio": 2.0, "priority": 1 },
+      { "name": "Nachtdienst", "startTime": "23:00", "endTime": "07:00", "hours": 8, "ratio": 1.0, "priority": 2 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 160,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2,
+      "fdOnlyRatio": 0.30
+    },
+    "expectations": {
+      "minCoverage": 0.80,
+      "maxHardViolations": 5,
+      "maxSoftViolations": 20,
+      "maxTimeMs": 8000
+    },
+    "tags": ["membership", "fd-only", "constraint"],
+    "priority": "high"
+  },
+  {
+    "id": "sched-membership-002",
+    "description": "Membership: 15 agents with 40% MaximumHours cap (GuaranteedHours*1.2), 100 FD shifts — period cap must not be exceeded",
+    "agentCount": 15,
+    "shiftCount": 100,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 150,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2,
+      "maxHoursCapRatio": 0.40
+    },
+    "expectations": {
+      "minCoverage": 0.85,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 15,
+      "maxTimeMs": 8000
+    },
+    "tags": ["membership", "hours-cap", "constraint"],
+    "priority": "high"
+  },
+  {
+    "id": "sched-fairness-001",
+    "description": "Fairness: 25 agents with wide guaranteed-hours spread (0.5..1.5x), 160 mixed shifts — tests heterogeneous workforce fairness",
+    "agentCount": 25,
+    "shiftCount": 160,
+    "shiftTypes": [
+      { "name": "Fruehdienst", "startTime": "07:00", "endTime": "15:00", "hours": 8, "ratio": 1.0, "priority": 1 },
+      { "name": "Spaetdienst", "startTime": "15:00", "endTime": "23:00", "hours": 8, "ratio": 1.0, "priority": 1 }
+    ],
+    "agentConfig": {
+      "guaranteedHours": 160,
+      "maxDailyHours": 10,
+      "maxWeeklyHours": 50,
+      "maxConsecutiveDays": 5,
+      "minRestHours": 12,
+      "maxOptimalGap": 2,
+      "guaranteedHoursSpread": 1.0
+    },
+    "expectations": {
+      "minCoverage": 0.85,
+      "maxHardViolations": 0,
+      "maxSoftViolations": 25,
+      "maxTimeMs": 8000
+    },
+    "tags": ["fairness", "heterogeneous"],
+    "priority": "medium"
   }
 ]

@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Auction;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
 using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
@@ -46,6 +47,7 @@ public sealed class TokenEvolutionLoop
     {
         var realChecker = checker ?? new TokenConstraintChecker();
         var builder = new TokenPopulationBuilder(
+            new AuctionTokenStrategy(),
             new CoverageFirstTokenStrategy(),
             new GreedyTokenStrategy(),
             new RandomTokenStrategy());
@@ -63,18 +65,35 @@ public sealed class TokenEvolutionLoop
         CoreWizardContext context,
         TokenEvolutionConfig config,
         IProgress<TokenEvolutionProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? trace = null)
     {
-        var rng = new Random(config.RandomSeed);
-        var evaluator = TokenFitnessEvaluator.Create(context);
-        var population = _populationBuilder
-            .BuildPopulation(context, config.PopulationSize, rng)
-            .ToList();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        trace?.Invoke($"Run: enter (population={config.PopulationSize}, maxGen={config.MaxGenerations}, agents={context.Agents.Count}, shifts={context.Shifts.Count}, lockedWorks={context.LockedWorks.Count})");
 
+        var rng = new Random(config.RandomSeed);
+        var evaluator = TokenFitnessEvaluator.Create(context, config);
+
+        var t0 = sw.ElapsedMilliseconds;
+        var population = _populationBuilder
+            .BuildPopulation(context, config.PopulationSize, rng, cancellationToken, trace, config.InitAuctionRatio)
+            .ToList();
+        trace?.Invoke($"Run: BuildPopulation done in {sw.ElapsedMilliseconds - t0}ms ({population.Count} scenarios)");
+        cancellationToken.ThrowIfCancellationRequested();
+
+        t0 = sw.ElapsedMilliseconds;
+        var idx = 0;
         foreach (var scenario in population)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             evaluator.Evaluate(scenario, context);
+            idx++;
+            if (idx % 10 == 0)
+            {
+                trace?.Invoke($"Run: initial Evaluate {idx}/{population.Count} at {sw.ElapsedMilliseconds - t0}ms");
+            }
         }
+        trace?.Invoke($"Run: initial Evaluate done in {sw.ElapsedMilliseconds - t0}ms");
 
         var best = SelectBest(population, evaluator);
         var generationsNoImprovement = 0;
@@ -82,6 +101,7 @@ public sealed class TokenEvolutionLoop
         for (var generation = 1; generation <= config.MaxGenerations; generation++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var genStart = sw.ElapsedMilliseconds;
 
             var next = population
                 .OrderBy(s => s, evaluator)
@@ -90,6 +110,7 @@ public sealed class TokenEvolutionLoop
 
             while (next.Count < config.PopulationSize)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var p1 = TournamentSelect(population, config.TournamentK, evaluator, rng);
                 var p2 = TournamentSelect(population, config.TournamentK, evaluator, rng);
 
@@ -108,7 +129,10 @@ public sealed class TokenEvolutionLoop
 
             population = next;
             var currentBest = SelectBest(population, evaluator);
-            currentBest = RunCoverageSweep(currentBest, context, rng, evaluator);
+
+            var sweepStart = sw.ElapsedMilliseconds;
+            currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
+            var sweepMs = sw.ElapsedMilliseconds - sweepStart;
 
             if (evaluator.Compare(currentBest, best) < 0)
             {
@@ -130,12 +154,19 @@ public sealed class TokenEvolutionLoop
                 BestStage2Score: best.FitnessStage2,
                 EarlyStopping: willStop));
 
+            var genMs = sw.ElapsedMilliseconds - genStart;
+            if (generation <= 3 || generation % 10 == 0 || willStop)
+            {
+                trace?.Invoke($"Run: gen={generation}/{config.MaxGenerations} took {genMs}ms (sweep={sweepMs}ms) tokens={best.Tokens.Count} stage1={best.FitnessStage1 * 100:F1}%");
+            }
+
             if (generationsNoImprovement >= config.EarlyStopNoImprovementGenerations)
             {
                 break;
             }
         }
 
+        trace?.Invoke($"Run: total {sw.ElapsedMilliseconds}ms");
         return best;
     }
 
@@ -227,9 +258,14 @@ public sealed class TokenEvolutionLoop
     }
 
     private CoreScenario RunCoverageSweep(
-        CoreScenario scenario, CoreWizardContext context, Random rng, TokenFitnessEvaluator evaluator)
+        CoreScenario scenario,
+        CoreWizardContext context,
+        Random rng,
+        TokenFitnessEvaluator evaluator,
+        CancellationToken cancellationToken = default,
+        Action<string>? trace = null)
     {
-        var filled = _repair.FillAllUnderSupply(scenario, context, rng);
+        var filled = _repair.FillAllUnderSupply(scenario, context, rng, cancellationToken, trace);
         if (filled.Tokens.Count != scenario.Tokens.Count)
         {
             evaluator.Evaluate(filled, context);
