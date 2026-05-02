@@ -23,7 +23,7 @@ public sealed class TokenConstraintChecker
         CheckMinPauseHours(scenario, context, violations);
         CheckMaxDailyHours(scenario, context, violations);
         CheckMaximumHoursExceeded(scenario, context, violations);
-        CheckUnderSupply(scenario, context, violations);
+        CheckSlotSupply(scenario, context, violations);
 
         return violations;
     }
@@ -130,38 +130,76 @@ public sealed class TokenConstraintChecker
 
     private static void CheckMaxConsecutiveDays(CoreScenario scenario, CoreWizardContext context, List<ConstraintViolation> violations)
     {
-        var cap = context.SchedulingMaxConsecutiveDays;
-        if (cap <= 0)
-        {
-            return;
-        }
+        var agentLookup = context.Agents.ToDictionary(a => a.Id);
+        var fallback = context.SchedulingMaxConsecutiveDays;
 
-        foreach (var block in scenario.Tokens.GroupBy(t => t.BlockId))
+        foreach (var perAgent in scenario.Tokens.GroupBy(t => t.AgentId))
         {
-            var distinctDays = block.Select(t => t.Date).Distinct().Count();
-            if (distinctDays > cap)
+            var cap = agentLookup.TryGetValue(perAgent.Key, out var agent) && agent.MaxConsecutiveDays > 0
+                ? agent.MaxConsecutiveDays
+                : fallback;
+            if (cap <= 0)
             {
-                var first = block.First();
+                continue;
+            }
+
+            var workingDays = perAgent.Select(t => t.Date).Distinct().OrderBy(d => d).ToList();
+            if (workingDays.Count == 0)
+            {
+                continue;
+            }
+
+            var runStart = workingDays[0];
+            var runLength = 1;
+            for (var i = 1; i < workingDays.Count; i++)
+            {
+                if (workingDays[i].DayNumber == workingDays[i - 1].DayNumber + 1)
+                {
+                    runLength++;
+                }
+                else
+                {
+                    if (runLength > cap)
+                    {
+                        violations.Add(new ConstraintViolation(
+                            ViolationKind.MaxConsecutiveDays,
+                            perAgent.Key,
+                            runStart,
+                            null,
+                            $"Agent has {runLength} consecutive days starting {runStart:yyyy-MM-dd}, cap is {cap}."));
+                    }
+                    runStart = workingDays[i];
+                    runLength = 1;
+                }
+            }
+
+            if (runLength > cap)
+            {
                 violations.Add(new ConstraintViolation(
                     ViolationKind.MaxConsecutiveDays,
-                    first.AgentId,
+                    perAgent.Key,
+                    runStart,
                     null,
-                    block.Key,
-                    $"Block has {distinctDays} consecutive days, cap is {cap}."));
+                    $"Agent has {runLength} consecutive days starting {runStart:yyyy-MM-dd}, cap is {cap}."));
             }
         }
     }
 
     private static void CheckMinPauseHours(CoreScenario scenario, CoreWizardContext context, List<ConstraintViolation> violations)
     {
-        var minPause = context.SchedulingMinPauseHours;
-        if (minPause <= 0)
-        {
-            return;
-        }
+        var agentLookup = context.Agents.ToDictionary(a => a.Id);
+        var fallback = context.SchedulingMinPauseHours;
 
         foreach (var perAgent in scenario.Tokens.GroupBy(t => t.AgentId))
         {
+            var minPause = agentLookup.TryGetValue(perAgent.Key, out var agent) && agent.MinRestHours > 0
+                ? agent.MinRestHours
+                : fallback;
+            if (minPause <= 0)
+            {
+                continue;
+            }
+
             var ordered = perAgent.OrderBy(t => t.StartAt).ToList();
             for (var i = 1; i < ordered.Count; i++)
             {
@@ -183,13 +221,12 @@ public sealed class TokenConstraintChecker
     {
         var dayLookup = context.ContractDays
             .ToDictionary(d => (d.AgentId, d.Date));
+        var agentLookup = context.Agents.ToDictionary(a => a.Id);
 
         foreach (var grouped in scenario.Tokens.GroupBy(t => (t.AgentId, t.Date)))
         {
             var sumHours = (double)grouped.Sum(t => t.TotalHours);
-            var cap = dayLookup.TryGetValue(grouped.Key, out var day) && day.MaximumHoursPerDay > 0
-                ? day.MaximumHoursPerDay
-                : context.SchedulingMaxDailyHours;
+            var cap = ResolveDailyCap(grouped.Key.AgentId, grouped.Key.Date, dayLookup, agentLookup, context);
 
             if (cap > 0 && sumHours > cap)
             {
@@ -201,6 +238,26 @@ public sealed class TokenConstraintChecker
                     $"Daily hours {sumHours} exceed cap {cap}."));
             }
         }
+    }
+
+    private static double ResolveDailyCap(
+        string agentId,
+        DateOnly date,
+        Dictionary<(string AgentId, DateOnly Date), CoreContractDay> dayLookup,
+        Dictionary<string, CoreAgent> agentLookup,
+        CoreWizardContext context)
+    {
+        if (dayLookup.TryGetValue((agentId, date), out var day) && day.MaximumHoursPerDay > 0)
+        {
+            return day.MaximumHoursPerDay;
+        }
+
+        if (agentLookup.TryGetValue(agentId, out var agent) && agent.MaxDailyHours > 0)
+        {
+            return agent.MaxDailyHours;
+        }
+
+        return context.SchedulingMaxDailyHours;
     }
 
     private static void CheckMaximumHoursExceeded(CoreScenario scenario, CoreWizardContext context, List<ConstraintViolation> violations)
@@ -228,7 +285,7 @@ public sealed class TokenConstraintChecker
         }
     }
 
-    private static void CheckUnderSupply(CoreScenario scenario, CoreWizardContext context, List<ConstraintViolation> violations)
+    private static void CheckSlotSupply(CoreScenario scenario, CoreWizardContext context, List<ConstraintViolation> violations)
     {
         if (context.Shifts.Count == 0)
         {
@@ -284,6 +341,27 @@ public sealed class TokenConstraintChecker
                     TokenBlockId: null,
                     Description: $"Shift {slot.Key.ShiftRefId} on {slot.Key.Date:yyyy-MM-dd} is understaffed ({assigned}/{slot.Value}).",
                     ShiftRefId: slot.Key.ShiftRefId));
+            }
+        }
+
+        foreach (var entry in tokensPerSlot)
+        {
+            capacityPerSlot.TryGetValue(entry.Key, out var capacity);
+            if (capacity <= 0)
+            {
+                continue;
+            }
+
+            var surplus = entry.Value - capacity;
+            for (var i = 0; i < surplus; i++)
+            {
+                violations.Add(new ConstraintViolation(
+                    Kind: ViolationKind.OverSupply,
+                    AgentId: string.Empty,
+                    Date: entry.Key.Date,
+                    TokenBlockId: null,
+                    Description: $"Shift {entry.Key.ShiftRefId} on {entry.Key.Date:yyyy-MM-dd} is overstaffed ({entry.Value}/{capacity}).",
+                    ShiftRefId: entry.Key.ShiftRefId));
             }
         }
     }

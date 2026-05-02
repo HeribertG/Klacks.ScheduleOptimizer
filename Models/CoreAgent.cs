@@ -30,6 +30,12 @@ public record CoreAgent(
     /// <summary>Full-time hours (basis for top-down ranking — Stage 2).</summary>
     public double FullTime { get; init; } = 0;
 
+    /// <summary>Soft maximum length of a single work block in days (e.g. 5). Hard cap stays MaxConsecutiveDays.</summary>
+    public int MaxWorkDays { get; init; } = 0;
+
+    /// <summary>Required free days between two work blocks (e.g. 2).</summary>
+    public int MinRestDays { get; init; } = 0;
+
     /// <summary>Hard upper bound on hours (Stage 0 violation if exceeded).</summary>
     public double MaximumHours { get; init; } = 0;
 

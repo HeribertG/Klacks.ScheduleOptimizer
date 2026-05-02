@@ -17,4 +17,5 @@ public enum ViolationKind
     BreakBlockerViolation,
     MaximumHoursExceeded,
     UnderSupply,
+    OverSupply,
 }

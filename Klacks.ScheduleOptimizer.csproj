@@ -20,6 +20,7 @@
     <None Update="Datasets\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <EmbeddedResource Include="TokenEvolution\Auction\Fuzzy\Resources\default-rules.json" />
   </ItemGroup>
 
 </Project>

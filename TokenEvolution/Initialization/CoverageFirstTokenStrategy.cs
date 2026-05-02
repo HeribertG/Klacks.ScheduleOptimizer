@@ -40,8 +40,10 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
             var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
             var slotHours = (decimal)slot.Hours;
             var shiftRefId = Guid.TryParse(slot.Id, out var parsedShift) ? parsedShift : Guid.Empty;
+            var slotStartUtc = slotDate.ToDateTime(start);
+            var slotEndUtc = end <= start ? slotDate.AddDays(1).ToDateTime(end) : slotDate.ToDateTime(end);
 
-            var bestAgent = SelectBestAgent(context, tokens, slotDate, shiftTypeIndex, slotHours, shiftRefId, rng);
+            var bestAgent = SelectBestAgent(context, tokens, slotDate, shiftTypeIndex, slotHours, shiftRefId, slotStartUtc, slotEndUtc, rng);
             if (bestAgent is null)
             {
                 continue;
@@ -52,8 +54,8 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
                 ShiftTypeIndex: shiftTypeIndex,
                 Date: slotDate,
                 TotalHours: slotHours,
-                StartAt: slotDate.ToDateTime(start),
-                EndAt: slotDate.ToDateTime(end),
+                StartAt: slotStartUtc,
+                EndAt: slotEndUtc,
                 BlockId: Guid.NewGuid(),
                 PositionInBlock: 0,
                 IsLocked: false,
@@ -76,6 +78,8 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
         int shiftTypeIndex,
         decimal slotHours,
         Guid shiftRefId,
+        DateTime slotStartUtc,
+        DateTime slotEndUtc,
         Random rng)
     {
         CoreAgent? best = null;
@@ -84,7 +88,7 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
 
         foreach (var agent in context.Agents)
         {
-            if (!SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, slotHours, context, tokens))
+            if (!SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, slotHours, context, tokens, slotStartUtc, slotEndUtc))
             {
                 continue;
             }

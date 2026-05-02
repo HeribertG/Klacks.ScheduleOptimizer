@@ -28,10 +28,12 @@ public sealed class RandomTokenStrategy : ITokenPopulationStrategy
             var end = ParseTimeOrDefault(slot.EndTime, start.AddHours(8));
             var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
             var slotHours = (decimal)slot.Hours;
+            var slotStartUtc = slotDate.Value.ToDateTime(start);
+            var slotEndUtc = end <= start ? slotDate.Value.AddDays(1).ToDateTime(end) : slotDate.Value.ToDateTime(end);
 
             var candidates = context.Agents
                 .Where(agent => SlotConstraintFilter.IsValidAssignment(
-                    agent, slotDate.Value, shiftTypeIndex, slotHours, context, tokens))
+                    agent, slotDate.Value, shiftTypeIndex, slotHours, context, tokens, slotStartUtc, slotEndUtc))
                 .ToList();
 
             if (candidates.Count == 0)
@@ -46,8 +48,8 @@ public sealed class RandomTokenStrategy : ITokenPopulationStrategy
                 ShiftTypeIndex: shiftTypeIndex,
                 Date: slotDate.Value,
                 TotalHours: slotHours,
-                StartAt: slotDate.Value.ToDateTime(start),
-                EndAt: slotDate.Value.ToDateTime(end),
+                StartAt: slotStartUtc,
+                EndAt: slotEndUtc,
                 BlockId: Guid.NewGuid(),
                 PositionInBlock: 0,
                 IsLocked: false,

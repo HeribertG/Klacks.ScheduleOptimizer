@@ -27,6 +27,9 @@ public class CoreWizardContext
 
     public IReadOnlyList<CoreLockedWork> LockedWorks { get; init; } = [];
 
+    /// <summary>Unlocked existing Works in the period; veto source for Stage 0 only, never lifted into the genome.</summary>
+    public IReadOnlyList<CoreExistingWorkBlocker> ExistingWorkBlockers { get; init; } = [];
+
     public int SchedulingMaxConsecutiveDays { get; init; } = 6;
 
     public double SchedulingMinPauseHours { get; init; } = 11;
