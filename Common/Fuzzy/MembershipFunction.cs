@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Fuzzy;
+namespace Klacks.ScheduleOptimizer.Common.Fuzzy;
 
 /// <summary>
 /// Membership function for a fuzzy linguistic term. Computes the degree of membership mu in [0,1]
@@ -30,8 +30,8 @@ public sealed class TrapezoidMf : MembershipFunction
 
     public override double Mu(double x)
     {
-        if (x <= A || x >= D) return 0;
         if (x >= B && x <= C) return 1;
+        if (x <= A || x >= D) return 0;
         if (x < B) return (x - A) / (B - A);
         return (D - x) / (D - C);
     }
@@ -55,8 +55,8 @@ public sealed class TriangularMf : MembershipFunction
 
     public override double Mu(double x)
     {
-        if (x <= A || x >= C) return 0;
         if (x == B) return 1;
+        if (x <= A || x >= C) return 0;
         if (x < B) return (x - A) / (B - A);
         return (C - x) / (C - B);
     }

@@ -4,18 +4,18 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Fuzzy;
+namespace Klacks.ScheduleOptimizer.Common.Fuzzy;
 
 /// <summary>
 /// Loads a fuzzy rule base from a JSON document. The JSON schema is a flat array of rule objects:
 /// `[{ "name":..., "if":[{"var":..., "is":...}], "op":"AND|OR", "then":{"var":..., "is":...} }]`.
 /// The default rule set is embedded as a resource at
-/// `Klacks.ScheduleOptimizer.TokenEvolution.Auction.Fuzzy.Resources.default-rules.json`.
+/// `Klacks.ScheduleOptimizer.Common.Fuzzy.Resources.default-rules.json`.
 /// </summary>
 public static class RuleBaseLoader
 {
     private const string DefaultResourceName =
-        "Klacks.ScheduleOptimizer.TokenEvolution.Auction.Fuzzy.Resources.default-rules.json";
+        "Klacks.ScheduleOptimizer.Common.Fuzzy.Resources.default-rules.json";
 
     public static IReadOnlyList<FuzzyRule> LoadDefault()
     {

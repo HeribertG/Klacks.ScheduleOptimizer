@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Fuzzy;
+namespace Klacks.ScheduleOptimizer.Common.Fuzzy;
 
 /// <summary>
 /// Phase-2 default linguistic variables for the bidding agent.

@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Fuzzy;
+namespace Klacks.ScheduleOptimizer.Common.Fuzzy;
 
 /// <summary>
 /// A single Mamdani rule. Antecedents are joined by AND (min) or OR (max). The consequent

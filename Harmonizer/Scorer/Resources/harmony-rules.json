@@ -1,0 +1,118 @@
+[
+  {
+    "name": "AllHigh_Excellent",
+    "if": [
+      { "var": "BlockSizeUniformity", "is": "High" },
+      { "var": "RestUniformity", "is": "High" },
+      { "var": "BlockHomogeneity", "is": "High" },
+      { "var": "TransitionCompliance", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Excellent" }
+  },
+  {
+    "name": "BSU_RU_BH_High_Good",
+    "if": [
+      { "var": "BlockSizeUniformity", "is": "High" },
+      { "var": "RestUniformity", "is": "High" },
+      { "var": "BlockHomogeneity", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "BSU_RU_TC_High_Good",
+    "if": [
+      { "var": "BlockSizeUniformity", "is": "High" },
+      { "var": "RestUniformity", "is": "High" },
+      { "var": "TransitionCompliance", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "BSU_BH_TC_High_Good",
+    "if": [
+      { "var": "BlockSizeUniformity", "is": "High" },
+      { "var": "BlockHomogeneity", "is": "High" },
+      { "var": "TransitionCompliance", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "RU_BH_TC_High_Good",
+    "if": [
+      { "var": "RestUniformity", "is": "High" },
+      { "var": "BlockHomogeneity", "is": "High" },
+      { "var": "TransitionCompliance", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "AllMedium_Mediocre",
+    "if": [
+      { "var": "BlockSizeUniformity", "is": "Medium" },
+      { "var": "RestUniformity", "is": "Medium" },
+      { "var": "BlockHomogeneity", "is": "Medium" },
+      { "var": "TransitionCompliance", "is": "Medium" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "BSU_RU_Medium_Mediocre",
+    "if": [
+      { "var": "BlockSizeUniformity", "is": "Medium" },
+      { "var": "RestUniformity", "is": "Medium" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "BH_TC_Medium_Mediocre",
+    "if": [
+      { "var": "BlockHomogeneity", "is": "Medium" },
+      { "var": "TransitionCompliance", "is": "Medium" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "BSU_Low_Poor",
+    "if": [{ "var": "BlockSizeUniformity", "is": "Low" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Poor" }
+  },
+  {
+    "name": "RU_Low_Poor",
+    "if": [{ "var": "RestUniformity", "is": "Low" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Poor" }
+  },
+  {
+    "name": "BH_Low_Poor",
+    "if": [{ "var": "BlockHomogeneity", "is": "Low" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Poor" }
+  },
+  {
+    "name": "TC_Low_Mediocre",
+    "if": [{ "var": "TransitionCompliance", "is": "Low" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "BSU_High_alone_Good",
+    "if": [{ "var": "BlockSizeUniformity", "is": "High" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "BH_High_alone_Good",
+    "if": [{ "var": "BlockHomogeneity", "is": "High" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  }
+]

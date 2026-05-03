@@ -1,7 +1,7 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
 using Klacks.ScheduleOptimizer.Models;
-using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Fuzzy;
+using Klacks.ScheduleOptimizer.Common.Fuzzy;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Agent;
 
