@@ -25,7 +25,7 @@ public sealed class HarmonizerConductor
         HarmonyScorer scorer,
         ReplaceMutation mutation,
         EmergencyUnlockManager emergencyUnlock,
-        int maxIterationsPerRow = 16,
+        int maxIterationsPerRow = 8,
         IReadOnlyList<SofteningHint>? hints = null,
         int hintRowIterationMultiplier = 2)
     {
@@ -39,7 +39,7 @@ public sealed class HarmonizerConductor
             : new HashSet<string>(hints.Select(h => h.AgentId), StringComparer.Ordinal);
     }
 
-    public ConductorResult Run(HarmonyBitmap bitmap)
+    public ConductorResult Run(HarmonyBitmap bitmap, CancellationToken ct = default)
     {
         var lockedRows = new HashSet<int>();
         var rowTraces = new List<RowTrace>(bitmap.RowCount);
@@ -48,7 +48,8 @@ public sealed class HarmonizerConductor
 
         for (var rowIndex = 0; rowIndex < bitmap.RowCount; rowIndex++)
         {
-            var trace = ProcessRow(bitmap, rowIndex, lockedRows, initialScores[rowIndex], medianInitial);
+            ct.ThrowIfCancellationRequested();
+            var trace = ProcessRow(bitmap, rowIndex, lockedRows, initialScores[rowIndex], medianInitial, ct);
             rowTraces.Add(trace);
             lockedRows.Add(rowIndex);
         }
@@ -62,7 +63,8 @@ public sealed class HarmonizerConductor
         int rowIndex,
         HashSet<int> lockedRows,
         double scoreBefore,
-        double medianInitialScore)
+        double medianInitialScore,
+        CancellationToken ct)
     {
         var movesApplied = 0;
         var emergencyUsed = false;
@@ -72,6 +74,7 @@ public sealed class HarmonizerConductor
 
         for (var iteration = 0; iteration < iterationBudget; iteration++)
         {
+            ct.ThrowIfCancellationRequested();
             var outcome = _mutation.FindBestMove(bitmap, rowIndex, lockedRows);
             if (outcome.Move is not null)
             {

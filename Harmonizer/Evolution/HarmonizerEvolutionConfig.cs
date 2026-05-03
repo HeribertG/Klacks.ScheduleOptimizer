@@ -10,10 +10,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Evolution;
 /// <param name="StagnationGenerations">Generations without improvement before early stop</param>
 /// <param name="Seed">Deterministic seed for the random source; null for non-deterministic runs</param>
 public sealed record HarmonizerEvolutionConfig(
-    int PopulationSize = 16,
-    int MaxGenerations = 40,
+    int PopulationSize = 8,
+    int MaxGenerations = 20,
     int EliteCount = 2,
     int TournamentSize = 3,
-    int StochasticMutationsPerOffspring = 4,
-    int StagnationGenerations = 8,
+    int StochasticMutationsPerOffspring = 2,
+    int StagnationGenerations = 5,
     int? Seed = null);
