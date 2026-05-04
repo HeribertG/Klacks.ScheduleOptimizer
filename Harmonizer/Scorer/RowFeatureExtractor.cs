@@ -82,7 +82,7 @@ public static class RowFeatureExtractor
         var preferred = bitmap.Rows[rowIndex].PreferredShiftSymbols;
         if (preferred is null || preferred.Count == 0)
         {
-            return 1.0;
+            return 0.5;
         }
 
         var workCells = 0;
