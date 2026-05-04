@@ -107,16 +107,38 @@ public sealed class BlockSwapMutation
 
     private bool ValidateBlockSwap(HarmonyBitmap bitmap, BlockSwapMove move)
     {
+        var applied = 0;
         for (var offset = 0; offset < move.Length; offset++)
         {
             var day = move.StartDay + offset;
             var perDay = new ReplaceMove(move.RowA, move.RowB, day);
             if (!_validator.IsValid(bitmap, perDay))
             {
+                UndoPartial(bitmap, move, applied);
                 return false;
             }
+            SwapDay(bitmap, move.RowA, move.RowB, day);
+            applied++;
         }
+
+        UndoPartial(bitmap, move, applied);
         return true;
+    }
+
+    private static void UndoPartial(HarmonyBitmap bitmap, BlockSwapMove move, int applied)
+    {
+        for (var offset = 0; offset < applied; offset++)
+        {
+            SwapDay(bitmap, move.RowA, move.RowB, move.StartDay + offset);
+        }
+    }
+
+    private static void SwapDay(HarmonyBitmap bitmap, int rowA, int rowB, int day)
+    {
+        var cellA = bitmap.GetCell(rowA, day);
+        var cellB = bitmap.GetCell(rowB, day);
+        bitmap.SetCell(rowA, day, cellB);
+        bitmap.SetCell(rowB, day, cellA);
     }
 
     private static void ApplySwap(HarmonyBitmap bitmap, BlockSwapMove move)
