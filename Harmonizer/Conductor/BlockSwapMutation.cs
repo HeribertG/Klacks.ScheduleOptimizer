@@ -210,11 +210,7 @@ public sealed class BlockSwapMutation
 
     private static double AsymmetricWeight(int primaryRow, int partnerRow)
     {
-        if (partnerRow > primaryRow)
-        {
-            return 1.0 / (primaryRow + 1);
-        }
-        return (double)(partnerRow + 1) / (primaryRow + 1);
+        return 1.0;
     }
 
     private readonly record struct Block(int StartDay, int Length);
