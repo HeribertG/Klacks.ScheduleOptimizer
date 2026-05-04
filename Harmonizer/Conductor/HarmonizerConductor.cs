@@ -16,6 +16,7 @@ public sealed class HarmonizerConductor
 {
     private readonly HarmonyScorer _scorer;
     private readonly ReplaceMutation _mutation;
+    private readonly BlockSwapMutation? _blockSwapMutation;
     private readonly EmergencyUnlockManager _emergencyUnlock;
     private readonly int _maxIterationsPerRow;
     private readonly int _hintRowIterationMultiplier;
@@ -27,10 +28,12 @@ public sealed class HarmonizerConductor
         EmergencyUnlockManager emergencyUnlock,
         int maxIterationsPerRow = 8,
         IReadOnlyList<SofteningHint>? hints = null,
-        int hintRowIterationMultiplier = 2)
+        int hintRowIterationMultiplier = 2,
+        BlockSwapMutation? blockSwapMutation = null)
     {
         _scorer = scorer;
         _mutation = mutation;
+        _blockSwapMutation = blockSwapMutation;
         _emergencyUnlock = emergencyUnlock;
         _maxIterationsPerRow = maxIterationsPerRow;
         _hintRowIterationMultiplier = hintRowIterationMultiplier <= 0 ? 1 : hintRowIterationMultiplier;
@@ -81,6 +84,17 @@ public sealed class HarmonizerConductor
                 _mutation.Apply(bitmap, outcome.Move);
                 movesApplied++;
                 continue;
+            }
+
+            if (_blockSwapMutation is not null)
+            {
+                var blockOutcome = _blockSwapMutation.FindBestMove(bitmap, rowIndex, lockedRows);
+                if (blockOutcome.Move is not null)
+                {
+                    _blockSwapMutation.Apply(bitmap, blockOutcome.Move);
+                    movesApplied++;
+                    continue;
+                }
             }
 
             if (emergencyUsed)

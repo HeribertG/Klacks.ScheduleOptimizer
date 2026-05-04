@@ -89,6 +89,11 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             return false;
         }
 
+        if (!RespectsKeywordRestriction(receivingAgent.Id, date, incomingCell.Symbol))
+        {
+            return false;
+        }
+
         if (incomingCell.ShiftRefId is Guid shiftId
             && receivingAgent.BlacklistedShiftIds is not null
             && receivingAgent.BlacklistedShiftIds.Contains(shiftId))
@@ -140,6 +145,26 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         {
             return availability.IsAvailable;
         }
+        return true;
+    }
+
+    private bool RespectsKeywordRestriction(string agentId, DateOnly date, CellSymbol incomingSymbol)
+    {
+        if (!_availability.TryGetValue((agentId, date), out var availability))
+        {
+            return true;
+        }
+
+        if (availability.RequiredSymbol is { } required && incomingSymbol != required)
+        {
+            return false;
+        }
+
+        if (availability.ForbiddenSymbol is { } forbidden && incomingSymbol == forbidden)
+        {
+            return false;
+        }
+
         return true;
     }
 

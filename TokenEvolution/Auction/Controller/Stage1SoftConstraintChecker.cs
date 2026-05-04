@@ -7,7 +7,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 /// <summary>
 /// Stage 1 — Soft. Rules that should normally hold but may be relaxed if no Stage-0-clean
 /// alternative exists. Currently checks: MaxWorkDays (preferred block-length cap, e.g. "5 days
-/// then rest"), MinRestDays (gap between blocks). MaxConsecutiveDays is a HARD cap and lives
+/// then rest"), MinRestDays (gap between blocks), PreferredShift (slot is in the agent's
+/// Preferred list when any preference exists). MaxConsecutiveDays is a HARD cap and lives
 /// in Stage0HardConstraintChecker.
 /// </summary>
 public sealed class Stage1SoftConstraintChecker
@@ -29,7 +30,45 @@ public sealed class Stage1SoftConstraintChecker
             return blockVeto;
         }
 
-        return CheckMinRestDays(agent, date, alreadyAssigned);
+        var restVeto = CheckMinRestDays(agent, date, alreadyAssigned);
+        if (restVeto != null)
+        {
+            return restVeto;
+        }
+
+        return CheckPreferredShift(agent, slot, date, context.ShiftPreferences);
+    }
+
+    private static VetoVerdict? CheckPreferredShift(
+        CoreAgent agent, CoreShift slot, DateOnly date, IReadOnlyList<CoreShiftPreference> preferences)
+    {
+        if (preferences.Count == 0 || string.IsNullOrEmpty(slot.Id) || !Guid.TryParse(slot.Id, out var slotShiftRefId))
+        {
+            return null;
+        }
+
+        var hasAnyPreferred = false;
+        var slotIsPreferred = false;
+        foreach (var pref in preferences)
+        {
+            if (pref.AgentId != agent.Id || pref.Kind != ShiftPreferenceKind.Preferred)
+            {
+                continue;
+            }
+            hasAnyPreferred = true;
+            if (pref.ShiftRefId == slotShiftRefId)
+            {
+                slotIsPreferred = true;
+                break;
+            }
+        }
+
+        if (hasAnyPreferred && !slotIsPreferred)
+        {
+            return new VetoVerdict(1, "PreferredShift",
+                $"Agent {agent.Id} has explicit shift preferences but slot {slot.Id} on {date:yyyy-MM-dd} is not in the preferred list.");
+        }
+        return null;
     }
 
     private static VetoVerdict? CheckBlockLength(

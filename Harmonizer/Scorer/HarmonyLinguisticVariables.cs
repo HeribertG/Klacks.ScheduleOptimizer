@@ -15,6 +15,8 @@ public static class HarmonyLinguisticVariables
     public const string RestUniformity = "RestUniformity";
     public const string BlockHomogeneity = "BlockHomogeneity";
     public const string TransitionCompliance = "TransitionCompliance";
+    public const string ShiftTypeRotation = "ShiftTypeRotation";
+    public const string PreferredShiftFraction = "PreferredShiftFraction";
     public const string HarmonyScore = "HarmonyScore";
 
     public const string TermLow = "Low";
@@ -35,6 +37,8 @@ public static class HarmonyLinguisticVariables
             [RestUniformity] = WithName(unitInterval, RestUniformity),
             [BlockHomogeneity] = WithName(unitInterval, BlockHomogeneity),
             [TransitionCompliance] = WithName(unitInterval, TransitionCompliance),
+            [ShiftTypeRotation] = WithName(unitInterval, ShiftTypeRotation),
+            [PreferredShiftFraction] = WithName(unitInterval, PreferredShiftFraction),
         };
     }
 

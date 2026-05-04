@@ -16,7 +16,7 @@ public static class RowFeatureExtractor
         var blocks = ScanBlocks(bitmap, rowIndex);
         if (blocks.Count == 0)
         {
-            return new RowFeatures(1.0, 1.0, 1.0, 1.0, 0);
+            return new RowFeatures(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0);
         }
 
         var blockSizeUniformity = Uniformity(blocks.ConvertAll(b => (double)b.Length));
@@ -24,8 +24,88 @@ public static class RowFeatureExtractor
         var restUniformity = restPeriods.Count == 0 ? 1.0 : Uniformity(restPeriods);
         var blockHomogeneity = ComputeBlockHomogeneity(bitmap, rowIndex, blocks);
         var transitionCompliance = ComputeTransitionCompliance(bitmap, rowIndex, blocks);
+        var shiftTypeRotation = ComputeShiftTypeRotation(bitmap, rowIndex, blocks);
+        var preferredShiftFraction = ComputePreferredShiftFraction(bitmap, rowIndex);
 
-        return new RowFeatures(blockSizeUniformity, restUniformity, blockHomogeneity, transitionCompliance, blocks.Count);
+        return new RowFeatures(
+            blockSizeUniformity,
+            restUniformity,
+            blockHomogeneity,
+            transitionCompliance,
+            shiftTypeRotation,
+            preferredShiftFraction,
+            blocks.Count);
+    }
+
+    private static double ComputeShiftTypeRotation(HarmonyBitmap bitmap, int rowIndex, List<Block> blocks)
+    {
+        if (blocks.Count < 2)
+        {
+            return 1.0;
+        }
+
+        Span<int> counts = stackalloc int[3];
+        var totalScorable = 0;
+        foreach (var block in blocks)
+        {
+            var dominant = DominantSymbol(bitmap, rowIndex, block);
+            if (dominant == CellSymbol.Early) { counts[0]++; totalScorable++; }
+            else if (dominant == CellSymbol.Late) { counts[1]++; totalScorable++; }
+            else if (dominant == CellSymbol.Night) { counts[2]++; totalScorable++; }
+        }
+
+        if (totalScorable < 2)
+        {
+            return 1.0;
+        }
+
+        var distinctClasses = 0;
+        var presentValues = new List<double>(3);
+        for (var i = 0; i < counts.Length; i++)
+        {
+            if (counts[i] > 0)
+            {
+                distinctClasses++;
+                presentValues.Add(counts[i]);
+            }
+        }
+
+        if (distinctClasses == 1)
+        {
+            return 0.0;
+        }
+        return Uniformity(presentValues);
+    }
+
+    private static double ComputePreferredShiftFraction(HarmonyBitmap bitmap, int rowIndex)
+    {
+        var preferred = bitmap.Rows[rowIndex].PreferredShiftSymbols;
+        if (preferred is null || preferred.Count == 0)
+        {
+            return 1.0;
+        }
+
+        var workCells = 0;
+        var preferredCells = 0;
+        for (var d = 0; d < bitmap.DayCount; d++)
+        {
+            var symbol = bitmap.GetCell(rowIndex, d).Symbol;
+            if (symbol == CellSymbol.Free)
+            {
+                continue;
+            }
+            workCells++;
+            if (preferred.Contains(symbol))
+            {
+                preferredCells++;
+            }
+        }
+
+        if (workCells == 0)
+        {
+            return 1.0;
+        }
+        return (double)preferredCells / workCells;
     }
 
     private static List<Block> ScanBlocks(HarmonyBitmap bitmap, int rowIndex)

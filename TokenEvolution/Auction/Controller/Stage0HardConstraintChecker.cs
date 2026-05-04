@@ -159,6 +159,12 @@ public sealed class Stage0HardConstraintChecker
             return keywordVeto;
         }
 
+        if (IsBlacklistedShift(agent.Id, slot.Id, context.ShiftPreferences))
+        {
+            return new VetoVerdict(0, "BlacklistedShift",
+                $"Agent {agent.Id} is blacklisted from shift {slot.Id} on {date.Value:yyyy-MM-dd}.");
+        }
+
         if (agent.MaximumHours > 0 && ExceedsMaxHours(agent, slotHours, alreadyAssigned))
         {
             return new VetoVerdict(0, "MaximumHoursContractCap",
@@ -204,6 +210,26 @@ public sealed class Stage0HardConstraintChecker
         DayOfWeek.Sunday => agent.WorkOnSunday,
         _ => false,
     };
+
+    private static bool IsBlacklistedShift(string agentId, string slotShiftRefId, IReadOnlyList<CoreShiftPreference> preferences)
+    {
+        if (preferences.Count == 0 || string.IsNullOrEmpty(slotShiftRefId))
+        {
+            return false;
+        }
+        if (!Guid.TryParse(slotShiftRefId, out var shiftRefId))
+        {
+            return false;
+        }
+        foreach (var pref in preferences)
+        {
+            if (pref.AgentId == agentId && pref.ShiftRefId == shiftRefId && pref.Kind == ShiftPreferenceKind.Blacklist)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private static bool IsBlockedByBreak(string agentId, DateOnly date, IReadOnlyList<CoreBreakBlocker> blockers)
     {

@@ -114,5 +114,58 @@
     "if": [{ "var": "BlockHomogeneity", "is": "High" }],
     "op": "AND",
     "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "STR_Low_Mediocre",
+    "if": [{ "var": "ShiftTypeRotation", "is": "Low" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "STR_High_BH_High_Good",
+    "if": [
+      { "var": "ShiftTypeRotation", "is": "High" },
+      { "var": "BlockHomogeneity", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "STR_High_BSU_High_BH_High_Excellent",
+    "if": [
+      { "var": "ShiftTypeRotation", "is": "High" },
+      { "var": "BlockSizeUniformity", "is": "High" },
+      { "var": "BlockHomogeneity", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Excellent" }
+  },
+  {
+    "name": "STR_Medium_Mediocre",
+    "if": [{ "var": "ShiftTypeRotation", "is": "Medium" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "PSF_Low_Mediocre",
+    "if": [{ "var": "PreferredShiftFraction", "is": "Low" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "PSF_High_alone_Good",
+    "if": [{ "var": "PreferredShiftFraction", "is": "High" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Good" }
+  },
+  {
+    "name": "STR_PSF_High_Excellent",
+    "if": [
+      { "var": "ShiftTypeRotation", "is": "High" },
+      { "var": "PreferredShiftFraction", "is": "High" },
+      { "var": "BlockHomogeneity", "is": "High" }
+    ],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Excellent" }
   }
 ]

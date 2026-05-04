@@ -36,6 +36,8 @@ public sealed class HarmonyScorer
             [HarmonyLinguisticVariables.RestUniformity] = features.RestUniformity,
             [HarmonyLinguisticVariables.BlockHomogeneity] = features.BlockHomogeneity,
             [HarmonyLinguisticVariables.TransitionCompliance] = features.TransitionCompliance,
+            [HarmonyLinguisticVariables.ShiftTypeRotation] = features.ShiftTypeRotation,
+            [HarmonyLinguisticVariables.PreferredShiftFraction] = features.PreferredShiftFraction,
         };
 
         var inference = _engine.Infer(inputs);
