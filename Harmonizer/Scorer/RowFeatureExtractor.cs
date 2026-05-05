@@ -39,6 +39,8 @@ public static class RowFeatureExtractor
             blocks.Count);
     }
 
+    private const double TargetHoursDeviationScale = 3.0;
+
     private static double ComputeTargetHoursDeviation(HarmonyBitmap bitmap, int rowIndex)
     {
         var target = (double)bitmap.Rows[rowIndex].TargetHours;
@@ -53,8 +55,8 @@ public static class RowFeatureExtractor
             actual += (double)bitmap.GetCell(rowIndex, d).Hours;
         }
 
-        var deviation = Math.Abs(actual - target) / target;
-        return Math.Clamp(deviation, 0.0, 1.0);
+        var rawDeviation = Math.Abs(actual - target) / target;
+        return Math.Clamp(rawDeviation * TargetHoursDeviationScale, 0.0, 1.0);
     }
 
     private static double ComputeShiftTypeRotation(HarmonyBitmap bitmap, int rowIndex, List<Block> blocks)
