@@ -105,7 +105,7 @@ public sealed class Stage1SoftConstraintChecker
 
         if (!hasPrev)
         {
-            var lastBefore = FindNearestAssignedDate(agent.Id, date, assigned, step: -1);
+            var lastBefore = FindNearestOccupiedDate(agent.Id, date, assigned, step: -1);
             if (lastBefore.HasValue)
             {
                 var gap = (date.DayNumber - lastBefore.Value.DayNumber) - 1;
@@ -119,7 +119,7 @@ public sealed class Stage1SoftConstraintChecker
 
         if (!hasNext)
         {
-            var firstAfter = FindNearestAssignedDate(agent.Id, date, assigned, step: +1);
+            var firstAfter = FindNearestOccupiedDate(agent.Id, date, assigned, step: +1);
             if (firstAfter.HasValue)
             {
                 var gap = (firstAfter.Value.DayNumber - date.DayNumber) - 1;
@@ -186,4 +186,35 @@ public sealed class Stage1SoftConstraintChecker
         }
         return best;
     }
+
+    private static DateOnly? FindNearestOccupiedDate(
+        string agentId, DateOnly anchor, IReadOnlyList<CoreToken> assigned, int step)
+    {
+        DateOnly? best = null;
+        foreach (var t in assigned)
+        {
+            if (t.AgentId != agentId) continue;
+            ConsiderDate(t.Date, anchor, step, ref best);
+            if (CrossesMidnight(t))
+            {
+                ConsiderDate(DateOnly.FromDateTime(t.EndAt), anchor, step, ref best);
+            }
+        }
+        return best;
+    }
+
+    private static void ConsiderDate(DateOnly candidate, DateOnly anchor, int step, ref DateOnly? best)
+    {
+        if (step < 0 && candidate < anchor)
+        {
+            if (!best.HasValue || candidate > best.Value) best = candidate;
+        }
+        else if (step > 0 && candidate > anchor)
+        {
+            if (!best.HasValue || candidate < best.Value) best = candidate;
+        }
+    }
+
+    private static bool CrossesMidnight(CoreToken t) =>
+        t.EndAt.Date > t.StartAt.Date;
 }

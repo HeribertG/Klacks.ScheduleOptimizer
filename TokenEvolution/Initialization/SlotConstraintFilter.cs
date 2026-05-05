@@ -235,7 +235,7 @@ public static class SlotConstraintFilter
 
         if (!hasPrev)
         {
-            var lastBefore = FindNearestAssignedDate(agent.Id, date, assigned, step: -1);
+            var lastBefore = FindNearestOccupiedDate(agent.Id, date, assigned, step: -1);
             if (lastBefore.HasValue)
             {
                 var gap = (date.DayNumber - lastBefore.Value.DayNumber) - 1;
@@ -248,7 +248,7 @@ public static class SlotConstraintFilter
 
         if (!hasNext)
         {
-            var firstAfter = FindNearestAssignedDate(agent.Id, date, assigned, step: +1);
+            var firstAfter = FindNearestOccupiedDate(agent.Id, date, assigned, step: +1);
             if (firstAfter.HasValue)
             {
                 var gap = (firstAfter.Value.DayNumber - date.DayNumber) - 1;
@@ -261,6 +261,40 @@ public static class SlotConstraintFilter
 
         return false;
     }
+
+    private static DateOnly? FindNearestOccupiedDate(
+        string agentId,
+        DateOnly anchor,
+        IReadOnlyList<CoreToken> assigned,
+        int step)
+    {
+        DateOnly? best = null;
+        foreach (var token in assigned)
+        {
+            if (token.AgentId != agentId) continue;
+            ConsiderDate(token.Date, anchor, step, ref best);
+            if (CrossesMidnight(token))
+            {
+                ConsiderDate(DateOnly.FromDateTime(token.EndAt), anchor, step, ref best);
+            }
+        }
+        return best;
+    }
+
+    private static void ConsiderDate(DateOnly candidate, DateOnly anchor, int step, ref DateOnly? best)
+    {
+        if (step < 0 && candidate < anchor)
+        {
+            if (!best.HasValue || candidate > best.Value) best = candidate;
+        }
+        else if (step > 0 && candidate > anchor)
+        {
+            if (!best.HasValue || candidate < best.Value) best = candidate;
+        }
+    }
+
+    private static bool CrossesMidnight(CoreToken token) =>
+        token.EndAt.Date > token.StartAt.Date;
 
     private static DateOnly? FindNearestAssignedDate(
         string agentId,
