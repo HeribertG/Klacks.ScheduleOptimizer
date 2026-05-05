@@ -129,6 +129,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var tokensByAgent = scenario.Tokens
             .GroupBy(t => t.AgentId)
             .ToDictionary(g => g.Key, g => g.Sum(t => (double)t.TotalHours));
+        var breakHoursByAgent = ComputeBreakHoursByAgent(context);
         var agentLookup = context.Agents.ToDictionary(a => a.Id);
 
         foreach (var agentId in _agentsInPriorityOrder)
@@ -143,19 +144,58 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 continue;
             }
 
+            var breakHours = breakHoursByAgent.GetValueOrDefault(agentId, 0);
             var maxPossible = _maxPossiblePerAgent.GetValueOrDefault(agentId, 0);
-            if (agent.GuaranteedHours > maxPossible + agent.CurrentHours)
+            if (agent.GuaranteedHours > maxPossible + agent.CurrentHours + breakHours)
             {
                 flags.Add(1);
                 continue;
             }
 
-            var covered = agent.CurrentHours + tokensByAgent.GetValueOrDefault(agentId, 0);
+            var covered = agent.CurrentHours
+                + tokensByAgent.GetValueOrDefault(agentId, 0)
+                + breakHours;
             flags.Add(covered >= agent.GuaranteedHours ? 1 : 0);
         }
 
         var completion = flags.Count == 0 ? 1.0 : flags.Sum() / (double)flags.Count;
         return (flags, completion);
+    }
+
+    /// <summary>
+    /// Sums Break.WorkTime for every break blocker per agent inside the period.
+    /// Break hours count toward target hours (Stage 1/2/4) but NEVER toward MaxWeeklyHours.
+    /// </summary>
+    private static Dictionary<string, double> ComputeBreakHoursByAgent(CoreWizardContext context)
+    {
+        var result = new Dictionary<string, double>(StringComparer.Ordinal);
+        if (context.BreakBlockers.Count == 0)
+        {
+            return result;
+        }
+
+        foreach (var blocker in context.BreakBlockers)
+        {
+            if (blocker.Hours <= 0m)
+            {
+                continue;
+            }
+
+            var fromDate = blocker.FromInclusive < context.PeriodFrom ? context.PeriodFrom : blocker.FromInclusive;
+            var untilDate = blocker.UntilInclusive > context.PeriodUntil ? context.PeriodUntil : blocker.UntilInclusive;
+            if (untilDate < fromDate)
+            {
+                continue;
+            }
+
+            var dayCount = untilDate.DayNumber - fromDate.DayNumber + 1;
+            var totalHours = (double)blocker.Hours * dayCount;
+            result[blocker.AgentId] = result.TryGetValue(blocker.AgentId, out var existing)
+                ? existing + totalHours
+                : totalHours;
+        }
+
+        return result;
     }
 
     private double ComputeStage2(CoreScenario scenario, CoreWizardContext context)
@@ -168,6 +208,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var tokensByAgent = scenario.Tokens
             .GroupBy(t => t.AgentId)
             .ToDictionary(g => g.Key, g => g.Sum(t => (double)t.TotalHours));
+        var breakHoursByAgent = ComputeBreakHoursByAgent(context);
         var agentLookup = context.Agents.ToDictionary(a => a.Id);
 
         double weightedScore = 0;
@@ -193,7 +234,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             }
             else
             {
-                var covered = agent.CurrentHours + tokensByAgent.GetValueOrDefault(agentId, 0);
+                var covered = agent.CurrentHours
+                    + tokensByAgent.GetValueOrDefault(agentId, 0)
+                    + breakHoursByAgent.GetValueOrDefault(agentId, 0);
                 coverage = Math.Min(covered, target) / target;
             }
 
@@ -309,14 +352,14 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             return 1;
         }
 
-        var fairness = ComputeFairnessScore(scenario);
+        var fairness = ComputeFairnessScore(scenario, context);
         var minimum = ComputeMinimumHoursScore(scenario, context);
         var symmetry = ComputeBlockSymmetryScore(scenario);
 
         return (fairness + minimum + symmetry) / 3.0;
     }
 
-    private double ComputeFairnessScore(CoreScenario scenario)
+    private double ComputeFairnessScore(CoreScenario scenario, CoreWizardContext context)
     {
         var agentLookupIds = _agentsInPriorityOrder;
         if (agentLookupIds.Count == 0)
@@ -328,6 +371,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var tokensByAgent = scenario.Tokens
             .GroupBy(t => t.AgentId)
             .ToDictionary(g => g.Key, g => g.Sum(t => (double)t.TotalHours));
+        var breakHoursByAgent = ComputeBreakHoursByAgent(context);
 
         foreach (var agentId in agentLookupIds)
         {
@@ -337,7 +381,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 continue;
             }
 
-            ratios.Add(Math.Min(1, tokensByAgent.GetValueOrDefault(agentId, 0) / max));
+            var covered = tokensByAgent.GetValueOrDefault(agentId, 0)
+                + breakHoursByAgent.GetValueOrDefault(agentId, 0);
+            ratios.Add(Math.Min(1, covered / max));
         }
 
         if (ratios.Count == 0)
@@ -355,6 +401,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var tokensByAgent = scenario.Tokens
             .GroupBy(t => t.AgentId)
             .ToDictionary(g => g.Key, g => g.Sum(t => (double)t.TotalHours));
+        var breakHoursByAgent = ComputeBreakHoursByAgent(context);
         var agentLookup = context.Agents.ToDictionary(a => a.Id);
 
         double weightedScore = 0;
@@ -371,7 +418,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             var weight = Math.Pow(Stage2Decay, i);
             weightSum += weight;
 
-            var actual = agent.CurrentHours + tokensByAgent.GetValueOrDefault(agentId, 0);
+            var actual = agent.CurrentHours
+                + tokensByAgent.GetValueOrDefault(agentId, 0)
+                + breakHoursByAgent.GetValueOrDefault(agentId, 0);
             var coverage = Math.Min(1, actual / agent.MinimumHours);
             weightedScore += weight * coverage;
         }

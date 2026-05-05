@@ -183,7 +183,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         if (dayIndex - 1 >= 0)
         {
             var previous = bitmap.GetCell(receivingRow, dayIndex - 1);
-            if (previous.Symbol != CellSymbol.Free && previous.EndAt != default)
+            if (IsWorkingDayCell(previous.Symbol) && previous.EndAt != default)
             {
                 var pause = (decimal)(incomingCell.StartAt - previous.EndAt).TotalHours;
                 if (pause < receivingAgent.MinPauseHours)
@@ -196,7 +196,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         if (dayIndex + 1 < bitmap.DayCount)
         {
             var next = bitmap.GetCell(receivingRow, dayIndex + 1);
-            if (next.Symbol != CellSymbol.Free && next.StartAt != default)
+            if (IsWorkingDayCell(next.Symbol) && next.StartAt != default)
             {
                 var pause = (decimal)(next.StartAt - incomingCell.EndAt).TotalHours;
                 if (pause < receivingAgent.MinPauseHours)
@@ -216,7 +216,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         int dayIndex,
         Cell incomingCell)
     {
-        if (receivingAgent.MaxConsecutiveDays <= 0 || incomingCell.Symbol == CellSymbol.Free)
+        if (receivingAgent.MaxConsecutiveDays <= 0 || !IsWorkingDayCell(incomingCell.Symbol))
         {
             return true;
         }
@@ -224,7 +224,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         var run = 1;
         for (var d = dayIndex - 1; d >= 0; d--)
         {
-            if (bitmap.GetCell(receivingRow, d).Symbol == CellSymbol.Free)
+            if (!IsWorkingDayCell(bitmap.GetCell(receivingRow, d).Symbol))
             {
                 break;
             }
@@ -232,13 +232,18 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         }
         for (var d = dayIndex + 1; d < bitmap.DayCount; d++)
         {
-            if (bitmap.GetCell(receivingRow, d).Symbol == CellSymbol.Free)
+            if (!IsWorkingDayCell(bitmap.GetCell(receivingRow, d).Symbol))
             {
                 break;
             }
             run++;
         }
         return run <= receivingAgent.MaxConsecutiveDays;
+    }
+
+    private static bool IsWorkingDayCell(CellSymbol symbol)
+    {
+        return symbol != CellSymbol.Free && symbol != CellSymbol.Break;
     }
 
     private static bool RespectsMaxWeeklyHours(
@@ -268,7 +273,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
                 continue;
             }
             var cell = bitmap.GetCell(receivingRow, d);
-            if (cell.Symbol != CellSymbol.Free)
+            if (IsWorkingDayCell(cell.Symbol))
             {
                 totalHours += cell.Hours;
             }

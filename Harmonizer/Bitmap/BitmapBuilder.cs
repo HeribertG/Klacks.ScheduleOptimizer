@@ -5,7 +5,9 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// <summary>
 /// Constructs a HarmonyBitmap from a flat list of persisted assignments. Multiple assignments
 /// on the same (agent, day) collapse to a single cell whose symbol represents the dominant shift
-/// of that day; locked status propagates if any contributing assignment is locked.
+/// of that day; locked status propagates if any contributing assignment is locked. Break
+/// assignments dominate any colliding Work assignment (the agent is absent, no real Work can
+/// happen on that day) and force IsLocked = true on the resulting cell.
 /// </summary>
 public static class BitmapBuilder
 {
@@ -110,8 +112,18 @@ public static class BitmapBuilder
         mergedWorkIds.AddRange(existing.WorkIds);
         mergedWorkIds.AddRange(incoming.WorkIds);
 
-        var dominant = (byte)existing.Symbol >= (byte)incoming.Symbol ? existing.Symbol : incoming.Symbol;
-        var locked = existing.IsLocked || incoming.IsLocked;
+        var existingIsBreak = existing.Symbol == CellSymbol.Break;
+        var incomingIsBreak = incoming.Symbol == CellSymbol.Break;
+        CellSymbol dominant;
+        if (existingIsBreak || incomingIsBreak)
+        {
+            dominant = CellSymbol.Break;
+        }
+        else
+        {
+            dominant = (byte)existing.Symbol >= (byte)incoming.Symbol ? existing.Symbol : incoming.Symbol;
+        }
+        var locked = existing.IsLocked || incoming.IsLocked || dominant == CellSymbol.Break;
         var earliestStart = existing.StartAt == default ? incoming.StartAt
             : incoming.StartAt == default ? existing.StartAt
             : existing.StartAt < incoming.StartAt ? existing.StartAt : incoming.StartAt;

@@ -6,8 +6,9 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Scorer;
 
 /// <summary>
 /// Extracts harmony features from a single bitmap row. A "work block" is a contiguous run of
-/// non-Free cells; a "rest period" is a contiguous run of Free cells *between* two blocks
-/// (leading and trailing free time is excluded from the variance calculation).
+/// working cells (Early/Late/Night/Other); Free and Break cells both interrupt a block and
+/// count as rest. Break.Hours still contributes to TargetHoursDeviation (the absence is paid),
+/// but Break is never part of a "block" or a preferred shift count.
 /// </summary>
 public static class RowFeatureExtractor
 {
@@ -40,6 +41,7 @@ public static class RowFeatureExtractor
     }
 
     private const double TargetHoursDeviationScale = 3.0;
+    private const int CellSymbolCount = (int)CellSymbol.Break + 1;
 
     private static double ComputeTargetHoursDeviation(HarmonyBitmap bitmap, int rowIndex)
     {
@@ -112,7 +114,7 @@ public static class RowFeatureExtractor
         for (var d = 0; d < bitmap.DayCount; d++)
         {
             var symbol = bitmap.GetCell(rowIndex, d).Symbol;
-            if (symbol == CellSymbol.Free)
+            if (!IsWorkSymbol(symbol))
             {
                 continue;
             }
@@ -137,7 +139,7 @@ public static class RowFeatureExtractor
         for (var d = 0; d < bitmap.DayCount; d++)
         {
             var symbol = bitmap.GetCell(rowIndex, d).Symbol;
-            if (symbol != CellSymbol.Free)
+            if (IsWorkSymbol(symbol))
             {
                 if (blockStart < 0)
                 {
@@ -158,6 +160,11 @@ public static class RowFeatureExtractor
             blocks.Add(new Block(blockStart, bitmap.DayCount - 1));
         }
         return blocks;
+    }
+
+    private static bool IsWorkSymbol(CellSymbol symbol)
+    {
+        return symbol != CellSymbol.Free && symbol != CellSymbol.Break;
     }
 
     private static List<double> InterBlockRestLengths(List<Block> blocks)
@@ -245,7 +252,7 @@ public static class RowFeatureExtractor
 
     private static CellSymbol DominantSymbol(HarmonyBitmap bitmap, int rowIndex, Block block)
     {
-        Span<int> counts = stackalloc int[5];
+        Span<int> counts = stackalloc int[CellSymbolCount];
         for (var d = block.StartDay; d <= block.EndDay; d++)
         {
             counts[(int)bitmap.GetCell(rowIndex, d).Symbol]++;
