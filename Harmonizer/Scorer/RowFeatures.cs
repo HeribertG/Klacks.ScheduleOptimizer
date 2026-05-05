@@ -8,6 +8,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Scorer;
 /// <param name="TransitionCompliance">[0,1] — fraction of inter-block shift changes that respect the Early→Late→Night order</param>
 /// <param name="ShiftTypeRotation">[0,1] — fairness of Early/Late/Night distribution across the agent's blocks; 1 = even rotation, 0 = single shift type only</param>
 /// <param name="PreferredShiftFraction">[0,1] — fraction of work cells whose dominant symbol is in the agent's preferred-shift list; 1 = all preferred</param>
+/// <param name="TargetHoursDeviation">[0,1] — 0 = actual hours match TargetHours exactly, 1 = deviation greater or equal to target (high = bad)</param>
 /// <param name="WorkBlockCount">Number of contiguous work blocks in the row (used for trivial-row detection)</param>
 public sealed record RowFeatures(
     double BlockSizeUniformity,
@@ -16,4 +17,5 @@ public sealed record RowFeatures(
     double TransitionCompliance,
     double ShiftTypeRotation,
     double PreferredShiftFraction,
+    double TargetHoursDeviation,
     int WorkBlockCount);

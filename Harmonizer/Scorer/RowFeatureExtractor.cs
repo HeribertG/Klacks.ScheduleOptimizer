@@ -14,9 +14,10 @@ public static class RowFeatureExtractor
     public static RowFeatures Extract(HarmonyBitmap bitmap, int rowIndex)
     {
         var blocks = ScanBlocks(bitmap, rowIndex);
+        var targetHoursDeviation = ComputeTargetHoursDeviation(bitmap, rowIndex);
         if (blocks.Count == 0)
         {
-            return new RowFeatures(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0);
+            return new RowFeatures(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, targetHoursDeviation, 0);
         }
 
         var blockSizeUniformity = Uniformity(blocks.ConvertAll(b => (double)b.Length));
@@ -34,7 +35,26 @@ public static class RowFeatureExtractor
             transitionCompliance,
             shiftTypeRotation,
             preferredShiftFraction,
+            targetHoursDeviation,
             blocks.Count);
+    }
+
+    private static double ComputeTargetHoursDeviation(HarmonyBitmap bitmap, int rowIndex)
+    {
+        var target = (double)bitmap.Rows[rowIndex].TargetHours;
+        if (target <= 0)
+        {
+            return 0.0;
+        }
+
+        var actual = 0.0;
+        for (var d = 0; d < bitmap.DayCount; d++)
+        {
+            actual += (double)bitmap.GetCell(rowIndex, d).Hours;
+        }
+
+        var deviation = Math.Abs(actual - target) / target;
+        return Math.Clamp(deviation, 0.0, 1.0);
     }
 
     private static double ComputeShiftTypeRotation(HarmonyBitmap bitmap, int rowIndex, List<Block> blocks)

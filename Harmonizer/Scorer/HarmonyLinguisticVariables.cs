@@ -17,6 +17,7 @@ public static class HarmonyLinguisticVariables
     public const string TransitionCompliance = "TransitionCompliance";
     public const string ShiftTypeRotation = "ShiftTypeRotation";
     public const string PreferredShiftFraction = "PreferredShiftFraction";
+    public const string TargetHoursDeviation = "TargetHoursDeviation";
     public const string HarmonyScore = "HarmonyScore";
 
     public const string TermLow = "Low";
@@ -39,6 +40,7 @@ public static class HarmonyLinguisticVariables
             [TransitionCompliance] = WithName(unitInterval, TransitionCompliance),
             [ShiftTypeRotation] = WithName(unitInterval, ShiftTypeRotation),
             [PreferredShiftFraction] = WithName(unitInterval, PreferredShiftFraction),
+            [TargetHoursDeviation] = WithName(unitInterval, TargetHoursDeviation),
         };
     }
 

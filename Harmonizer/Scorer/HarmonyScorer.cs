@@ -38,6 +38,7 @@ public sealed class HarmonyScorer
             [HarmonyLinguisticVariables.TransitionCompliance] = features.TransitionCompliance,
             [HarmonyLinguisticVariables.ShiftTypeRotation] = features.ShiftTypeRotation,
             [HarmonyLinguisticVariables.PreferredShiftFraction] = features.PreferredShiftFraction,
+            [HarmonyLinguisticVariables.TargetHoursDeviation] = features.TargetHoursDeviation,
         };
 
         var inference = _engine.Infer(inputs);

@@ -167,5 +167,17 @@
     ],
     "op": "AND",
     "then": { "var": "HarmonyScore", "is": "Excellent" }
+  },
+  {
+    "name": "TGT_OffTarget_Mediocre",
+    "if": [{ "var": "TargetHoursDeviation", "is": "Medium" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Mediocre" }
+  },
+  {
+    "name": "TGT_FarOffTarget_Poor",
+    "if": [{ "var": "TargetHoursDeviation", "is": "High" }],
+    "op": "AND",
+    "then": { "var": "HarmonyScore", "is": "Poor" }
   }
 ]
