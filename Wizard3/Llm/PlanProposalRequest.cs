@@ -14,6 +14,10 @@ namespace Klacks.ScheduleOptimizer.Wizard3.Llm;
 /// task; until then we ship the same text rendering as the MVP.</param>
 /// <param name="AgentSummary">Per-row summary of agent constraints (target hours, max weekly,
 /// max consecutive, min pause, preferred symbols).</param>
+/// <param name="FragmentationSummary">Deterministic, pre-computed fragmentation analysis: which
+/// rows have multiple work blocks, where the gap days are, and which rows are most fragmented.
+/// Lifts the perceptual load off the LLM, which empirically (2026-05-06) cannot reliably scan
+/// the raw text grid for fragmentation patterns at production sizes.</param>
 /// <param name="MaxStepsPerBatch">Adaptive cap on the number of swaps the LLM may put into
 /// a single batch. Grows on accepted batches, shrinks on rejects.</param>
 /// <param name="Language">UI language for the LLM's intent label and reason field.</param>
@@ -25,6 +29,7 @@ public sealed record PlanProposalRequest(
     string ModelId,
     string PlanText,
     string AgentSummary,
+    string FragmentationSummary,
     int MaxStepsPerBatch,
     string Language,
     int IterationIndex,
