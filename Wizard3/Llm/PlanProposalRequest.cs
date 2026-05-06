@@ -25,6 +25,10 @@ namespace Klacks.ScheduleOptimizer.Wizard3.Llm;
 /// stamped into the resulting <see cref="MutationBatch.LlmIteration"/>.</param>
 /// <param name="PriorRejections">Compact digest of recently rejected batches used to steer
 /// the LLM away from repeating them.</param>
+/// <param name="PlanPng">Optional PNG rendering of the bitmap for vision-capable models.
+/// Providers that support image input (Anthropic Claude, Groq llama-vision, Gemini)
+/// attach this as a content block alongside the text prompt; text-only providers ignore
+/// it. When null or empty, the LLM receives only <see cref="PlanText"/>.</param>
 public sealed record PlanProposalRequest(
     string ModelId,
     string PlanText,
@@ -33,4 +37,5 @@ public sealed record PlanProposalRequest(
     int MaxStepsPerBatch,
     string Language,
     int IterationIndex,
-    IReadOnlyList<RejectMemoryEntry> PriorRejections);
+    IReadOnlyList<RejectMemoryEntry> PriorRejections,
+    byte[]? PlanPng = null);

@@ -126,6 +126,9 @@ public sealed class HarmonyBitmapPngRenderer
             StrokeWidth = _options.LockedBorderThickness,
             IsAntialias = false,
         };
+        using var symbolFont = new SKFont { Size = CellFontSize };
+        using var darkSymbolPaint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
+        using var lightSymbolPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
         for (var r = 0; r < bitmap.RowCount; r++)
         {
@@ -153,9 +156,31 @@ public sealed class HarmonyBitmapPngRenderer
                 var inset = borderPaint.StrokeWidth / 2f;
                 var borderRect = new SKRect(rect.Left + inset, rect.Top + inset, rect.Right - inset, rect.Bottom - inset);
                 canvas.DrawRect(borderRect, borderPaint);
+
+                var symbolLetter = ResolveSymbolLetter(cell.Symbol);
+                if (symbolLetter is not null)
+                {
+                    var paint = NeedsLightSymbol(cell.Symbol) ? lightSymbolPaint : darkSymbolPaint;
+                    var centerX = rect.MidX;
+                    var baselineY = rect.MidY + (CellFontSize / 2f) - 1;
+                    DrawCenteredText(canvas, symbolFont, paint, symbolLetter, centerX, baselineY);
+                }
             }
         }
     }
+
+    private static string? ResolveSymbolLetter(CellSymbol symbol) => symbol switch
+    {
+        CellSymbol.Early => "E",
+        CellSymbol.Late => "L",
+        CellSymbol.Night => "N",
+        CellSymbol.Other => "O",
+        CellSymbol.Break => "B",
+        _ => null,
+    };
+
+    private static bool NeedsLightSymbol(CellSymbol symbol) =>
+        symbol == CellSymbol.Night || symbol == CellSymbol.Other;
 
     private bool IsWeekendColumn(HarmonyBitmap bitmap, int dayIndex)
     {
