@@ -60,12 +60,13 @@ public sealed class PlanMutationValidator
         }
 
         var move = new ReplaceMove(swap.RowA, swap.RowB, swap.DayA);
-        if (!_domainValidator.IsValid(bitmap, move))
+        var diagnosis = _domainValidator.Diagnose(bitmap, move);
+        if (diagnosis is not null)
         {
             return new PlanMutationRejection(
                 swap,
                 PlanMutationRejectionReason.HardConstraintViolation,
-                "DomainAwareReplaceValidator rejected the swap (caps, pause, blacklist or availability).");
+                diagnosis);
         }
 
         return null;

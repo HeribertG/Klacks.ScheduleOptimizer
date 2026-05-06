@@ -25,11 +25,20 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         _availability = availability ?? new Dictionary<(string, DateOnly), DayAvailability>();
     }
 
-    public bool IsValid(HarmonyBitmap bitmap, ReplaceMove move)
+    public bool IsValid(HarmonyBitmap bitmap, ReplaceMove move) => Diagnose(bitmap, move) is null;
+
+    /// <summary>
+    /// Returns null if the move is valid, otherwise a short human-readable explanation
+    /// naming the violated constraint and the specific values involved (run length,
+    /// pause hours, weekly hours, etc.). Used by Wizard 3 to feed structured rejections
+    /// back to the LLM through <c>RejectMemory</c>.
+    /// </summary>
+    public string? Diagnose(HarmonyBitmap bitmap, ReplaceMove move)
     {
-        if (!IsBitmapLocallyValid(bitmap, move))
+        var local = DiagnoseBitmapLocal(bitmap, move);
+        if (local is not null)
         {
-            return false;
+            return local;
         }
 
         var cellA = bitmap.GetCell(move.RowA, move.Day);
@@ -38,91 +47,105 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         var agentA = bitmap.Rows[move.RowA];
         var agentB = bitmap.Rows[move.RowB];
 
-        if (!IsReceivingSideAdmissible(bitmap, move.RowA, agentA, date, cellB))
+        var sideA = DiagnoseReceivingSide(bitmap, move.RowA, agentA, date, cellB, "rowA");
+        if (sideA is not null)
         {
-            return false;
+            return sideA;
         }
-        if (!IsReceivingSideAdmissible(bitmap, move.RowB, agentB, date, cellA))
+        var sideB = DiagnoseReceivingSide(bitmap, move.RowB, agentB, date, cellA, "rowB");
+        if (sideB is not null)
         {
-            return false;
+            return sideB;
         }
 
-        return true;
+        return null;
     }
 
-    private static bool IsBitmapLocallyValid(HarmonyBitmap bitmap, ReplaceMove move)
+    private static string? DiagnoseBitmapLocal(HarmonyBitmap bitmap, ReplaceMove move)
     {
         if (move.RowA == move.RowB)
         {
-            return false;
+            return "rowA equals rowB";
         }
         if (move.RowA < 0 || move.RowA >= bitmap.RowCount)
         {
-            return false;
+            return $"rowA {move.RowA} out of bounds (rowCount {bitmap.RowCount})";
         }
         if (move.RowB < 0 || move.RowB >= bitmap.RowCount)
         {
-            return false;
+            return $"rowB {move.RowB} out of bounds (rowCount {bitmap.RowCount})";
         }
         if (move.Day < 0 || move.Day >= bitmap.DayCount)
         {
-            return false;
+            return $"day {move.Day} out of bounds (dayCount {bitmap.DayCount})";
         }
-        return !bitmap.GetCell(move.RowA, move.Day).IsLocked
-            && !bitmap.GetCell(move.RowB, move.Day).IsLocked;
+        if (bitmap.GetCell(move.RowA, move.Day).IsLocked)
+        {
+            return $"cell at rowA={move.RowA} day={move.Day} is locked";
+        }
+        if (bitmap.GetCell(move.RowB, move.Day).IsLocked)
+        {
+            return $"cell at rowB={move.RowB} day={move.Day} is locked";
+        }
+        return null;
     }
 
-    private bool IsReceivingSideAdmissible(
+    private string? DiagnoseReceivingSide(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,
         DateOnly date,
-        Cell incomingCell)
+        Cell incomingCell,
+        string roleLabel)
     {
         if (incomingCell.Symbol == CellSymbol.Free)
         {
-            return true;
+            return null;
         }
 
         if (!IsAvailableOnDate(receivingAgent.Id, date))
         {
-            return false;
+            return $"{roleLabel} {receivingAgent.DisplayName} not available on {date:yyyy-MM-dd}";
         }
 
-        if (!RespectsKeywordRestriction(receivingAgent.Id, date, incomingCell.Symbol))
+        var keywordIssue = DiagnoseKeywordRestriction(receivingAgent.Id, date, incomingCell.Symbol);
+        if (keywordIssue is not null)
         {
-            return false;
+            return $"{roleLabel} {receivingAgent.DisplayName}: {keywordIssue}";
         }
 
         if (incomingCell.ShiftRefId is Guid shiftId
             && receivingAgent.BlacklistedShiftIds is not null
             && receivingAgent.BlacklistedShiftIds.Contains(shiftId))
         {
-            return false;
+            return $"{roleLabel} {receivingAgent.DisplayName} blacklisted for shift {incomingCell.Symbol}";
         }
 
         var dayIndex = IndexOfDate(bitmap.Days, date);
         if (dayIndex < 0)
         {
-            return true;
+            return null;
         }
 
-        if (!RespectsMinPause(bitmap, receivingRow, receivingAgent, dayIndex, incomingCell))
+        var pauseIssue = DiagnoseMinPause(bitmap, receivingRow, receivingAgent, dayIndex, incomingCell);
+        if (pauseIssue is not null)
         {
-            return false;
+            return $"{roleLabel} {receivingAgent.DisplayName}: {pauseIssue}";
         }
 
-        if (!RespectsMaxConsecutiveDays(bitmap, receivingRow, receivingAgent, dayIndex, incomingCell))
+        var consecIssue = DiagnoseMaxConsecutiveDays(bitmap, receivingRow, receivingAgent, dayIndex, incomingCell);
+        if (consecIssue is not null)
         {
-            return false;
+            return $"{roleLabel} {receivingAgent.DisplayName}: {consecIssue}";
         }
 
-        if (!RespectsMaxWeeklyHours(bitmap, receivingRow, receivingAgent, date, dayIndex, incomingCell))
+        var weeklyIssue = DiagnoseMaxWeeklyHours(bitmap, receivingRow, receivingAgent, date, dayIndex, incomingCell);
+        if (weeklyIssue is not null)
         {
-            return false;
+            return $"{roleLabel} {receivingAgent.DisplayName}: {weeklyIssue}";
         }
 
-        return true;
+        return null;
     }
 
     private static int IndexOfDate(IReadOnlyList<DateOnly> days, DateOnly date)
@@ -148,27 +171,27 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         return true;
     }
 
-    private bool RespectsKeywordRestriction(string agentId, DateOnly date, CellSymbol incomingSymbol)
+    private string? DiagnoseKeywordRestriction(string agentId, DateOnly date, CellSymbol incomingSymbol)
     {
         if (!_availability.TryGetValue((agentId, date), out var availability))
         {
-            return true;
+            return null;
         }
 
         if (availability.RequiredSymbol is { } required && incomingSymbol != required)
         {
-            return false;
+            return $"day requires {required} but incoming cell is {incomingSymbol}";
         }
 
         if (availability.ForbiddenSymbol is { } forbidden && incomingSymbol == forbidden)
         {
-            return false;
+            return $"day forbids {forbidden}";
         }
 
-        return true;
+        return null;
     }
 
-    private static bool RespectsMinPause(
+    private static string? DiagnoseMinPause(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,
@@ -177,7 +200,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     {
         if (receivingAgent.MinPauseHours <= 0 || incomingCell.StartAt == default || incomingCell.EndAt == default)
         {
-            return true;
+            return null;
         }
 
         if (dayIndex - 1 >= 0)
@@ -188,7 +211,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
                 var pause = (decimal)(incomingCell.StartAt - previous.EndAt).TotalHours;
                 if (pause < receivingAgent.MinPauseHours)
                 {
-                    return false;
+                    return $"MinPauseHours violated: previous shift ends {previous.EndAt:HH:mm}, new shift starts {incomingCell.StartAt:HH:mm} (pause {pause:F1}h, min {receivingAgent.MinPauseHours}h)";
                 }
             }
         }
@@ -201,15 +224,15 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
                 var pause = (decimal)(next.StartAt - incomingCell.EndAt).TotalHours;
                 if (pause < receivingAgent.MinPauseHours)
                 {
-                    return false;
+                    return $"MinPauseHours violated: new shift ends {incomingCell.EndAt:HH:mm}, next shift starts {next.StartAt:HH:mm} (pause {pause:F1}h, min {receivingAgent.MinPauseHours}h)";
                 }
             }
         }
 
-        return true;
+        return null;
     }
 
-    private static bool RespectsMaxConsecutiveDays(
+    private static string? DiagnoseMaxConsecutiveDays(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,
@@ -218,7 +241,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     {
         if (receivingAgent.MaxConsecutiveDays <= 0 || !IsWorkingDayCell(incomingCell.Symbol))
         {
-            return true;
+            return null;
         }
 
         var run = 1;
@@ -238,7 +261,11 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             }
             run++;
         }
-        return run <= receivingAgent.MaxConsecutiveDays;
+        if (run > receivingAgent.MaxConsecutiveDays)
+        {
+            return $"MaxConsecutiveDays exceeded: run would be {run} days, cap is {receivingAgent.MaxConsecutiveDays}";
+        }
+        return null;
     }
 
     private static bool IsWorkingDayCell(CellSymbol symbol)
@@ -246,7 +273,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         return symbol != CellSymbol.Free && symbol != CellSymbol.Break;
     }
 
-    private static bool RespectsMaxWeeklyHours(
+    private static string? DiagnoseMaxWeeklyHours(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,
@@ -256,7 +283,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     {
         if (receivingAgent.MaxWeeklyHours <= 0 || incomingCell.Hours <= 0)
         {
-            return true;
+            return null;
         }
 
         var targetWeek = WeekOf(date);
@@ -279,7 +306,11 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             }
         }
 
-        return totalHours <= receivingAgent.MaxWeeklyHours;
+        if (totalHours > receivingAgent.MaxWeeklyHours)
+        {
+            return $"MaxWeeklyHours exceeded: week total would be {totalHours:F1}h, cap is {receivingAgent.MaxWeeklyHours}h";
+        }
+        return null;
     }
 
     private static (int Year, int Week) WeekOf(DateOnly date)

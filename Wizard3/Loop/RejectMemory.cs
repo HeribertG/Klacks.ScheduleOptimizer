@@ -44,18 +44,24 @@ public sealed class RejectMemory
         }
     }
 
-    private static string BuildSummary(BatchEvaluation evaluation) => evaluation.Result switch
+    private static string BuildSummary(BatchEvaluation evaluation)
     {
-        BatchAcceptance.WouldDegrade =>
-            $"all steps passed hard constraints but final score {evaluation.ScoreAfter:F3} <= start {evaluation.ScoreBefore:F3}",
-        BatchAcceptance.PartiallyAccepted =>
-            $"prefix of {evaluation.AppliedSteps.Count} step(s) kept; rest broke at step {evaluation.StoppedAtStep}",
-        BatchAcceptance.Rejected when evaluation.Rejections.Count > 0 =>
-            $"step {evaluation.StoppedAtStep ?? 0}: {evaluation.Rejections[0].Reason} ({evaluation.Rejections[0].Detail})",
-        BatchAcceptance.Rejected =>
-            "no valid step",
-        _ => string.Empty,
-    };
+        switch (evaluation.Result)
+        {
+            case BatchAcceptance.WouldDegrade:
+                return $"all steps passed hard constraints but final score {evaluation.ScoreAfter:F3} <= start {evaluation.ScoreBefore:F3}";
+            case BatchAcceptance.PartiallyAccepted:
+                return $"prefix of {evaluation.AppliedSteps.Count} step(s) kept; rest broke at step {evaluation.StoppedAtStep}";
+            case BatchAcceptance.Rejected when evaluation.Rejections.Count > 0:
+                var rej = evaluation.Rejections[0];
+                var swap = rej.Swap;
+                return $"step {evaluation.StoppedAtStep ?? 0} (rowA={swap.RowA} dayA={swap.DayA} ↔ rowB={swap.RowB} dayB={swap.DayB}) {rej.Reason}: {rej.Detail}";
+            case BatchAcceptance.Rejected:
+                return "no valid step";
+            default:
+                return string.Empty;
+        }
+    }
 }
 
 /// <param name="Intent">Intent label of the rejected batch.</param>
