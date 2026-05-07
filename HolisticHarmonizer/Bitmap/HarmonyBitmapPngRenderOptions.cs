@@ -13,9 +13,9 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Bitmap;
 /// <param name="LockedBorderThickness">Stroke width in pixels for the thick black border drawn around locked or Break cells</param>
 /// <param name="TintWeekends">When true, Saturday and Sunday columns receive a light tint background</param>
 public sealed record HarmonyBitmapPngRenderOptions(
-    int CellSize = 20,
-    int HeaderLeft = 30,
-    int HeaderTop = 30,
+    int CellSize = 24,
+    int HeaderLeft = 32,
+    int HeaderTop = 32,
     int LockedBorderThickness = 2,
     bool TintWeekends = true)
 {

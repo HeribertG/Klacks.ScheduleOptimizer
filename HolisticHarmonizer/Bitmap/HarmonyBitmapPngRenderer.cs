@@ -18,10 +18,11 @@ public sealed class HarmonyBitmapPngRenderer
     private const int PngQuality = 100;
     private const int HeaderFontSize = 11;
     private const int CellFontSize = 10;
-    private const int CellLabelFontSize = 14;
+    private const int CellLabelFontSize = 18;
     private const float ThinBorderThickness = 1f;
     private const float HatchStripeSpacing = 4f;
     private const float HatchStrokeWidth = 2f;
+    private const float SymbolOutlineWidth = 3f;
 
     private static readonly SKColor BackgroundColor = SKColors.White;
     private static readonly SKColor HeaderBackgroundColor = new(0xF0, 0xF0, 0xF0);
@@ -34,7 +35,7 @@ public sealed class HarmonyBitmapPngRenderer
     private static readonly SKColor EarlyFillColor = new(0xFF, 0xD7, 0x00);
     private static readonly SKColor LateFillColor = new(0xFF, 0x8C, 0x00);
     private static readonly SKColor NightFillColor = new(0x1E, 0x3A, 0x8A);
-    private static readonly SKColor OtherFillColor = new(0x80, 0x80, 0x80);
+    private static readonly SKColor OtherFillColor = new(0x4B, 0x55, 0x63);
     private static readonly SKColor BreakStripeColor = new(0xDC, 0x26, 0x26);
     private static readonly SKColor BreakBackgroundColor = SKColors.White;
 
@@ -128,8 +129,24 @@ public sealed class HarmonyBitmapPngRenderer
             IsAntialias = false,
         };
         using var symbolFont = new SKFont { Size = CellLabelFontSize, Embolden = true };
-        using var darkSymbolPaint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
-        using var lightSymbolPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        using var darkSymbolFillPaint = new SKPaint { Color = SKColors.Black, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var lightSymbolFillPaint = new SKPaint { Color = SKColors.White, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var darkSymbolStrokePaint = new SKPaint
+        {
+            Color = SKColors.White,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = SymbolOutlineWidth,
+            StrokeJoin = SKStrokeJoin.Round,
+        };
+        using var lightSymbolStrokePaint = new SKPaint
+        {
+            Color = SKColors.Black,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = SymbolOutlineWidth,
+            StrokeJoin = SKStrokeJoin.Round,
+        };
 
         for (var r = 0; r < bitmap.RowCount; r++)
         {
@@ -161,10 +178,13 @@ public sealed class HarmonyBitmapPngRenderer
                 var symbolLetter = ResolveSymbolLetter(cell.Symbol);
                 if (symbolLetter is not null)
                 {
-                    var paint = NeedsLightSymbol(cell.Symbol) ? lightSymbolPaint : darkSymbolPaint;
+                    var lightSymbol = NeedsLightSymbol(cell.Symbol);
+                    var fillPaintForSymbol = lightSymbol ? lightSymbolFillPaint : darkSymbolFillPaint;
+                    var strokePaintForSymbol = lightSymbol ? lightSymbolStrokePaint : darkSymbolStrokePaint;
                     var centerX = rect.MidX;
-                    var baselineY = rect.MidY + (CellLabelFontSize / 2f) - 1;
-                    DrawCenteredText(canvas, symbolFont, paint, symbolLetter, centerX, baselineY);
+                    var baselineY = rect.MidY + (CellLabelFontSize / 2f) - 2;
+                    DrawCenteredText(canvas, symbolFont, strokePaintForSymbol, symbolLetter, centerX, baselineY);
+                    DrawCenteredText(canvas, symbolFont, fillPaintForSymbol, symbolLetter, centerX, baselineY);
                 }
             }
         }

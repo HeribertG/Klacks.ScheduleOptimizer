@@ -6,13 +6,14 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 
 /// <summary>
 /// Bounded ring of recent batch rejections that the inner loop replays back to the LLM
-/// in the next prompt so it stops repeating discarded ideas. Capacity is intentionally small
-/// (5 entries) to keep prompt overhead low; oldest entries fall out as new ones arrive.
+/// in the next prompt so it stops repeating discarded ideas. Capacity defaults to 10 entries
+/// — large enough to cover a full inner-loop run (<c>MaxInnerIterations = 10</c> with up to
+/// 3 batches each) without the prompt overhead exploding. Oldest entries fall out as new ones arrive.
 /// </summary>
-/// <param name="capacity">Maximum number of entries kept; defaults to 5.</param>
+/// <param name="capacity">Maximum number of entries kept; defaults to 10.</param>
 public sealed class RejectMemory
 {
-    private const int DefaultCapacity = 5;
+    private const int DefaultCapacity = 10;
 
     private readonly int _capacity;
     private readonly LinkedList<RejectMemoryEntry> _entries = new();
@@ -37,12 +38,47 @@ public sealed class RejectMemory
         }
 
         var summary = BuildSummary(evaluation);
-        _entries.AddLast(new RejectMemoryEntry(evaluation.Intent, evaluation.Result, summary));
+        var rejectedSwaps = ExtractRejectedSwaps(evaluation);
+        _entries.AddLast(new RejectMemoryEntry(evaluation.Intent, evaluation.Result, summary, rejectedSwaps));
         while (_entries.Count > _capacity)
         {
             _entries.RemoveFirst();
         }
     }
+
+    /// <summary>
+    /// Returns the de-duplicated set of swap coordinates that the LLM should NOT repeat,
+    /// in canonical form (smaller row first, then smaller day). Used by the prompt builder
+    /// to emit a compact "DO NOT REPEAT THESE EXACT SWAPS" list per iteration.
+    /// </summary>
+    public IReadOnlyList<ForbiddenSwapKey> ForbiddenSwapKeys()
+    {
+        var seen = new HashSet<ForbiddenSwapKey>();
+        var ordered = new List<ForbiddenSwapKey>();
+        foreach (var entry in _entries)
+        {
+            for (var i = 0; i < entry.RejectedSwaps.Count; i++)
+            {
+                var key = ForbiddenSwapKey.From(entry.RejectedSwaps[i]);
+                if (seen.Add(key))
+                {
+                    ordered.Add(key);
+                }
+            }
+        }
+        return ordered;
+    }
+
+    private static IReadOnlyList<PlanCellSwap> ExtractRejectedSwaps(BatchEvaluation evaluation) =>
+        evaluation.Result switch
+        {
+            BatchAcceptance.Rejected => evaluation.Rejections.Count > 0
+                ? evaluation.Rejections.Select(r => r.Swap).ToList()
+                : [],
+            BatchAcceptance.PartiallyAccepted => evaluation.Rejections.Select(r => r.Swap).ToList(),
+            BatchAcceptance.WouldDegrade => evaluation.AppliedSteps,
+            _ => [],
+        };
 
     private static string BuildSummary(BatchEvaluation evaluation)
     {
@@ -67,4 +103,25 @@ public sealed class RejectMemory
 /// <param name="Intent">Intent label of the rejected batch.</param>
 /// <param name="Result">Acceptance category that triggered the memory entry (never Accepted).</param>
 /// <param name="Summary">Compact human-readable cause for the LLM prompt.</param>
-public sealed record RejectMemoryEntry(string Intent, BatchAcceptance Result, string Summary);
+/// <param name="RejectedSwaps">Concrete swap coordinates that did not survive evaluation;
+/// surfaced in the next prompt as a DO-NOT-REPEAT list so the LLM stops re-emitting them.</param>
+public sealed record RejectMemoryEntry(
+    string Intent,
+    BatchAcceptance Result,
+    string Summary,
+    IReadOnlyList<PlanCellSwap> RejectedSwaps);
+
+/// <summary>
+/// Canonical key for a swap coordinate pair (rowA, dayA, rowB, dayB), normalized so the
+/// pair (a, b) and (b, a) hash to the same key. Day must match (same-day swap invariant)
+/// so it is stored once. Used by reject memory to deduplicate forbidden-swap entries.
+/// </summary>
+public readonly record struct ForbiddenSwapKey(int RowSmaller, int RowLarger, int Day)
+{
+    public static ForbiddenSwapKey From(PlanCellSwap swap)
+    {
+        ArgumentNullException.ThrowIfNull(swap);
+        var (smaller, larger) = swap.RowA <= swap.RowB ? (swap.RowA, swap.RowB) : (swap.RowB, swap.RowA);
+        return new ForbiddenSwapKey(smaller, larger, swap.DayA);
+    }
+}
