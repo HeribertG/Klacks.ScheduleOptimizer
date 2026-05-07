@@ -18,6 +18,7 @@ public sealed class HarmonyBitmapPngRenderer
     private const int PngQuality = 100;
     private const int HeaderFontSize = 11;
     private const int CellFontSize = 10;
+    private const int CellLabelFontSize = 14;
     private const float ThinBorderThickness = 1f;
     private const float HatchStripeSpacing = 4f;
     private const float HatchStrokeWidth = 2f;
@@ -126,7 +127,7 @@ public sealed class HarmonyBitmapPngRenderer
             StrokeWidth = _options.LockedBorderThickness,
             IsAntialias = false,
         };
-        using var symbolFont = new SKFont { Size = CellFontSize };
+        using var symbolFont = new SKFont { Size = CellLabelFontSize, Embolden = true };
         using var darkSymbolPaint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
         using var lightSymbolPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
@@ -162,7 +163,7 @@ public sealed class HarmonyBitmapPngRenderer
                 {
                     var paint = NeedsLightSymbol(cell.Symbol) ? lightSymbolPaint : darkSymbolPaint;
                     var centerX = rect.MidX;
-                    var baselineY = rect.MidY + (CellFontSize / 2f) - 1;
+                    var baselineY = rect.MidY + (CellLabelFontSize / 2f) - 1;
                     DrawCenteredText(canvas, symbolFont, paint, symbolLetter, centerX, baselineY);
                 }
             }
