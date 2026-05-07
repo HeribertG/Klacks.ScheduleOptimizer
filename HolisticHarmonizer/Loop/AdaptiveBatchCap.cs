@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Loop;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 
 /// <summary>
 /// Tracks the maximum number of steps the LLM may put into a single batch. Grows on accepted

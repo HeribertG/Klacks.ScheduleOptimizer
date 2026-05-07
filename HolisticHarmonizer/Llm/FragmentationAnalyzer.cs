@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Text;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Llm;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 
 /// <summary>
 /// Computes a deterministic fragmentation summary that the LLM can read as a pre-digested

@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Bitmap;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Bitmap;
 
 /// <summary>
 /// Configuration for <see cref="HarmonyBitmapPngRenderer"/>. All values are pixel sizes

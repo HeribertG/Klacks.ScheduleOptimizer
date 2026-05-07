@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Mutations;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
 /// A single mutation proposed by the LLM: swap the cell contents of two (row, day) coordinates.

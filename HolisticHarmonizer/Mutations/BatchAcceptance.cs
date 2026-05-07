@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Mutations;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
 /// Outcome category for a <see cref="MutationBatch"/> after evaluation by the BatchEvaluator.

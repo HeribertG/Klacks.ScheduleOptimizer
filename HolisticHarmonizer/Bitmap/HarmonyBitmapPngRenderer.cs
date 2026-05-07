@@ -4,10 +4,10 @@ using System.Globalization;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using SkiaSharp;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Bitmap;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Bitmap;
 
 /// <summary>
-/// Renders a <see cref="HarmonyBitmap"/> as a PNG image for vision-capable LLMs in Wizard 3.
+/// Renders a <see cref="HarmonyBitmap"/> as a PNG image for vision-capable LLMs in Holistic Harmonizer.
 /// Cells are colored by <see cref="CellSymbol"/>; locked cells get a thick black border;
 /// Break cells use a red/white diagonal hatch pattern. Weekend columns receive a light tint
 /// so the LLM can locate Saturday/Sunday at a glance.

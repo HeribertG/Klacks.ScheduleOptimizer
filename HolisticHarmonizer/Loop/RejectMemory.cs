@@ -1,8 +1,8 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-using Klacks.ScheduleOptimizer.Wizard3.Mutations;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Loop;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 
 /// <summary>
 /// Bounded ring of recent batch rejections that the inner loop replays back to the LLM

@@ -4,10 +4,10 @@ using System.Globalization;
 using System.Text;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Llm;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 
 /// <summary>
-/// Renders a <see cref="HarmonyBitmap"/> as a plain-text grid for text-only LLMs in the Wizard 3
+/// Renders a <see cref="HarmonyBitmap"/> as a plain-text grid for text-only LLMs in the Holistic Harmonizer
 /// MVP. Each row is one agent, each column is one calendar day. Symbols are single-letter codes
 /// (E/L/N/O/_) with an asterisk suffix marking locked cells and a B for break/absence.
 /// </summary>

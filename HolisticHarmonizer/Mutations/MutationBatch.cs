@@ -1,10 +1,10 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Mutations;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
 /// A coordinated group of cell swaps the LLM proposes as one atomic transformation.
-/// Wizard 3 evaluates the batch as a unit (apply all, score the end state, revert if worse)
+/// Holistic Harmonizer evaluates the batch as a unit (apply all, score the end state, revert if worse)
 /// rather than per-step, so the LLM can suggest holistic moves where intermediate steps
 /// would temporarily worsen the score but the final state improves it.
 /// </summary>

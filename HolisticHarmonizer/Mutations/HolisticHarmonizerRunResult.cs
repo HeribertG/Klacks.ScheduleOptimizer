@@ -2,10 +2,10 @@
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Mutations;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
-/// Outcome of a single Wizard 3 inner-loop run. Carries the full iteration history so the UI
+/// Outcome of a single Holistic Harmonizer inner-loop run. Carries the full iteration history so the UI
 /// can show what the LLM tried, what was accepted, what was rejected, and how the score
 /// trajectory progressed.
 /// </summary>
@@ -21,7 +21,7 @@ namespace Klacks.ScheduleOptimizer.Wizard3.Mutations;
 /// UI should surface this so the operator can pick a different model.</param>
 /// <param name="LlmRawResponsePreview">First ~600 chars of the last raw LLM response when
 /// parsing failed; null otherwise.</param>
-public sealed record Wizard3RunResult(
+public sealed record HolisticHarmonizerRunResult(
     HarmonyBitmap OriginalBitmap,
     HarmonyBitmap FinalBitmap,
     IReadOnlyList<BatchEvaluation> Iterations,

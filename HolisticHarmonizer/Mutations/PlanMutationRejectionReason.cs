@@ -1,9 +1,9 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Mutations;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
-/// Why a swap proposed by the LLM was discarded by the Wizard 3 hard-constraint layer.
+/// Why a swap proposed by the LLM was discarded by the Holistic Harmonizer hard-constraint layer.
 /// </summary>
 public enum PlanMutationRejectionReason : byte
 {

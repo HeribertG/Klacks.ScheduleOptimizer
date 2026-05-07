@@ -2,12 +2,12 @@
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Conductor;
-using Klacks.ScheduleOptimizer.Wizard3.Mutations;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Validation;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 
 /// <summary>
-/// Hard-constraint layer for Wizard 3. Wraps the Wizard 2 <see cref="DomainAwareReplaceValidator"/>
+/// Hard-constraint layer for Holistic Harmonizer. Wraps the Wizard 2 <see cref="DomainAwareReplaceValidator"/>
 /// for same-day swaps and applies cheap pre-checks (bounds, locks, no-op) before delegating.
 /// MVP scope: cross-day swaps are rejected — only same-day (DayA == DayB) moves are admitted.
 /// </summary>
@@ -35,7 +35,7 @@ public sealed class PlanMutationValidator
             return new PlanMutationRejection(
                 swap,
                 PlanMutationRejectionReason.HardConstraintViolation,
-                "Cross-day swaps are not supported in Wizard 3 MVP — DayA must equal DayB.");
+                "Cross-day swaps are not supported in Holistic Harmonizer MVP — DayA must equal DayB.");
         }
 
         if (swap.RowA == swap.RowB)

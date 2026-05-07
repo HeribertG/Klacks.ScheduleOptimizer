@@ -1,8 +1,8 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-using Klacks.ScheduleOptimizer.Wizard3.Loop;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Llm;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 
 /// <summary>
 /// Input for one inner-loop LLM call. The engine assembles a fresh request per iteration

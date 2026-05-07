@@ -2,9 +2,9 @@
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Evolution;
-using Klacks.ScheduleOptimizer.Wizard3.Mutations;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
-namespace Klacks.ScheduleOptimizer.Wizard3.Validation;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 
 /// <summary>
 /// Evaluates a <see cref="MutationBatch"/> as one atomic transformation: applies steps in order,
