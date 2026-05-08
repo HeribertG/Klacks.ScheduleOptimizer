@@ -9,7 +9,11 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// <summary>
 /// Hard-constraint layer for Holistic Harmonizer. Wraps the Wizard 2 <see cref="DomainAwareReplaceValidator"/>
 /// for same-day swaps and applies cheap pre-checks (bounds, locks, no-op) before delegating.
-/// MVP scope: cross-day swaps are rejected — only same-day (DayA == DayB) moves are admitted.
+/// Cross-day swaps (DayA != DayB) are admitted when coverage-neutral — i.e. both cells share the
+/// same work-or-free state so the daily head-count on each affected day stays unchanged. The
+/// per-row constraint check (max-consec, min-pause) for cross-day is delegated to the
+/// constraint-agent committee plus score-greedy because <c>DomainAwareReplaceValidator</c> is
+/// scoped to single-day swaps; this is an explicit trade-off documented in the spec.
 /// </summary>
 public sealed class PlanMutationValidator
 {
@@ -30,17 +34,9 @@ public sealed class PlanMutationValidator
             return new PlanMutationRejection(swap, PlanMutationRejectionReason.OutOfBounds, FormatCoords(swap, bitmap));
         }
 
-        if (swap.DayA != swap.DayB)
+        if (swap.RowA == swap.RowB && swap.DayA == swap.DayB)
         {
-            return new PlanMutationRejection(
-                swap,
-                PlanMutationRejectionReason.HardConstraintViolation,
-                "Cross-day swaps are not supported in Holistic Harmonizer MVP — DayA must equal DayB.");
-        }
-
-        if (swap.RowA == swap.RowB)
-        {
-            return new PlanMutationRejection(swap, PlanMutationRejectionReason.NoEffect, "RowA equals RowB.");
+            return new PlanMutationRejection(swap, PlanMutationRejectionReason.NoEffect, "RowA equals RowB and DayA equals DayB.");
         }
 
         var cellA = bitmap.GetCell(swap.RowA, swap.DayA);
@@ -59,18 +55,33 @@ public sealed class PlanMutationValidator
             return new PlanMutationRejection(swap, PlanMutationRejectionReason.NoEffect, "Cells already share the same symbol.");
         }
 
-        var move = new ReplaceMove(swap.RowA, swap.RowB, swap.DayA);
-        var diagnosis = _domainValidator.Diagnose(bitmap, move);
-        if (diagnosis is not null)
+        var crossDay = swap.DayA != swap.DayB;
+        if (crossDay && IsWork(cellA.Symbol) != IsWork(cellB.Symbol))
         {
             return new PlanMutationRejection(
                 swap,
                 PlanMutationRejectionReason.HardConstraintViolation,
-                diagnosis);
+                "Cross-day swap would change daily work coverage: one cell is work, the other is free. Only swap two cells with the same work-or-free state across different days.");
+        }
+
+        if (!crossDay)
+        {
+            var move = new ReplaceMove(swap.RowA, swap.RowB, swap.DayA);
+            var diagnosis = _domainValidator.Diagnose(bitmap, move);
+            if (diagnosis is not null)
+            {
+                return new PlanMutationRejection(
+                    swap,
+                    PlanMutationRejectionReason.HardConstraintViolation,
+                    diagnosis);
+            }
         }
 
         return null;
     }
+
+    private static bool IsWork(CellSymbol symbol)
+        => symbol == CellSymbol.Early || symbol == CellSymbol.Late || symbol == CellSymbol.Night || symbol == CellSymbol.Other;
 
     public static void Apply(HarmonyBitmap bitmap, PlanCellSwap swap)
     {

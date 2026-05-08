@@ -7,14 +7,19 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee;
 
 /// <summary>
 /// Runs every <see cref="IConstraintAgent"/> over a proposed swap and aggregates the verdicts
-/// into a single committee decision. Voting rule: <c>Approved = vetoes &lt;= approves</c> — i.e.
-/// the swap is blocked only when strictly more agents object than support it. Ties and
-/// all-abstain results approve the swap so the LLM gets the benefit of the doubt; the
-/// score-greedy layer downstream still has the final word.
+/// into a single committee decision. Voting rule: a swap is blocked only when at least
+/// <c>VetoCoalitionThreshold</c> agents object AND vetoes strictly outnumber approves. A lone
+/// veto is treated as a hint, not a block — the score-greedy layer downstream still rejects
+/// genuinely degrading swaps, and we do not want any single over-eager agent to starve the LLM
+/// of approved moves. Ties and all-abstain results approve the swap so the LLM gets the
+/// benefit of the doubt.
 /// </summary>
 /// <param name="agents">All committee members; order is preserved in the verdicts list.</param>
 public sealed class ConstraintAgentCommittee
 {
+    /// <summary>Minimum number of veto votes required to block a swap. A single veto is downgraded to a hint.</summary>
+    public const int VetoCoalitionThreshold = 2;
+
     private readonly IReadOnlyList<IConstraintAgent> _agents;
 
     public ConstraintAgentCommittee(IEnumerable<IConstraintAgent> agents)
@@ -39,7 +44,8 @@ public sealed class ConstraintAgentCommittee
             else if (verdict.Vote == ConstraintAgentVote.Veto) vetoes++;
         }
 
-        var approved = vetoes <= approves;
+        var blocked = vetoes >= VetoCoalitionThreshold && vetoes > approves;
+        var approved = !blocked;
         var summary = approved
             ? string.Empty
             : string.Join("; ", verdicts
