@@ -29,6 +29,10 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 /// Providers that support image input (Anthropic Claude, Groq llama-vision, Gemini)
 /// attach this as a content block alongside the text prompt; text-only providers ignore
 /// it. When null or empty, the LLM receives only <see cref="PlanText"/>.</param>
+/// <param name="FocusedIntent">Optional roulette-selected intent the goal section of the
+/// prompt should emphasize this iteration. Defaults to <see cref="HolisticIntent.ConsolidateBlock"/>
+/// for backward compatibility. The LLM may still emit other allowed intents, but the
+/// focused one is the primary suggestion for this iteration.</param>
 public sealed record PlanProposalRequest(
     string ModelId,
     string PlanText,
@@ -38,4 +42,5 @@ public sealed record PlanProposalRequest(
     string Language,
     int IterationIndex,
     IReadOnlyList<RejectMemoryEntry> PriorRejections,
-    byte[]? PlanPng = null);
+    byte[]? PlanPng = null,
+    string FocusedIntent = HolisticIntent.ConsolidateBlock);
