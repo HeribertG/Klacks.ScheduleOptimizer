@@ -18,4 +18,7 @@ public enum PlanMutationRejectionReason : byte
 
     /// <summary>The cells already hold the same symbol — swapping is a no-op.</summary>
     NoEffect = 3,
+
+    /// <summary>The swap was hard-valid but vetoed by a majority of constraint-agents.</summary>
+    CommitteeVeto = 4,
 }
