@@ -14,7 +14,31 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee.Agents;
 /// </summary>
 public sealed class PauseConstraintAgent : IConstraintAgent
 {
+    private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
+
     public string Name => "Pause";
+
+    public PauseConstraintAgent()
+        : this(boundaryAssignments: null)
+    {
+    }
+
+    /// <param name="boundaryAssignments">
+    /// Optional list of works/breaks adjacent to the bitmap. The night-to-day-shift detector consults
+    /// these when the swap sits on day 0 or the last day, so a Night cell on the last day of the previous
+    /// period correctly flags an early-shift placement on day 0 as a rough transition.
+    /// </param>
+    public PauseConstraintAgent(IReadOnlyList<BitmapAssignment>? boundaryAssignments)
+    {
+        _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
+        if (boundaryAssignments is not null)
+        {
+            foreach (var assignment in boundaryAssignments)
+            {
+                _boundaryByKey[(assignment.AgentId, assignment.Date)] = assignment;
+            }
+        }
+    }
 
     public ConstraintAgentVerdict Evaluate(HarmonyBitmap before, PlanCellSwap swap)
     {
@@ -45,18 +69,30 @@ public sealed class PauseConstraintAgent : IConstraintAgent
         return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Abstain, "no transition pattern affected");
     }
 
-    private static bool HasRoughTransition(HarmonyBitmap bitmap, int rowIndex, int dayIndex, CellSymbol symbol)
+    private bool HasRoughTransition(HarmonyBitmap bitmap, int rowIndex, int dayIndex, CellSymbol symbol)
     {
+        var agentId = bitmap.Rows[rowIndex].Id;
+
         if (dayIndex > 0)
         {
             var prev = bitmap.GetCell(rowIndex, dayIndex - 1).Symbol;
             if (IsNight(prev) && IsDayShift(symbol)) return true;
         }
+        else if (_boundaryByKey.TryGetValue((agentId, bitmap.Days[0].AddDays(-1)), out var prevBoundary))
+        {
+            if (IsNight(prevBoundary.Symbol) && IsDayShift(symbol)) return true;
+        }
+
         if (dayIndex < bitmap.DayCount - 1)
         {
             var next = bitmap.GetCell(rowIndex, dayIndex + 1).Symbol;
             if (IsNight(symbol) && IsDayShift(next)) return true;
         }
+        else if (_boundaryByKey.TryGetValue((agentId, bitmap.Days[^1].AddDays(1)), out var nextBoundary))
+        {
+            if (IsNight(symbol) && IsDayShift(nextBoundary.Symbol)) return true;
+        }
+
         return false;
     }
 

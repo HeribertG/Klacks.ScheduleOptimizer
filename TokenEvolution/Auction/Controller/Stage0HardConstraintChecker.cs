@@ -340,19 +340,19 @@ public sealed class Stage0HardConstraintChecker
             return false;
         }
 
-        var before = CountConsecutive(agent.Id, date, assigned, step: -1);
-        var after = CountConsecutive(agent.Id, date, assigned, step: +1);
+        var before = CountConsecutive(agent.Id, date, assigned, context, step: -1);
+        var after = CountConsecutive(agent.Id, date, assigned, context, step: +1);
         runLength = before + 1 + after;
 
         return runLength > hardCap;
     }
 
     private static int CountConsecutive(
-        string agentId, DateOnly anchor, IReadOnlyList<CoreToken> assigned, int step)
+        string agentId, DateOnly anchor, IReadOnlyList<CoreToken> assigned, CoreWizardContext context, int step)
     {
         var count = 0;
         var probe = anchor.AddDays(step);
-        while (HasAssignmentOnDate(agentId, probe, assigned))
+        while (HasWorkOnDate(agentId, probe, assigned, context))
         {
             count++;
             probe = probe.AddDays(step);
@@ -360,8 +360,13 @@ public sealed class Stage0HardConstraintChecker
         return count;
     }
 
-    private static bool HasAssignmentOnDate(
-        string agentId, DateOnly date, IReadOnlyList<CoreToken> assigned)
+    /// <summary>
+    /// Checks whether the agent has any work on a given date — including boundary works outside
+    /// [PeriodFrom, PeriodUntil]. A break on the date is NOT a work and the consecutive walk stops there
+    /// (matches the in-period semantics where a free or break day breaks the streak).
+    /// </summary>
+    private static bool HasWorkOnDate(
+        string agentId, DateOnly date, IReadOnlyList<CoreToken> assigned, CoreWizardContext context)
     {
         foreach (var t in assigned)
         {
@@ -370,6 +375,27 @@ public sealed class Stage0HardConstraintChecker
                 return true;
             }
         }
+
+        // Boundary context: works on days adjacent to the period count toward MaxConsecutiveDays runs
+        // crossing the period start or end, but are never planned by the GA.
+        if (date < context.PeriodFrom || date > context.PeriodUntil)
+        {
+            foreach (var locked in context.BoundaryLockedWorks)
+            {
+                if (locked.AgentId == agentId && locked.Date == date)
+                {
+                    return true;
+                }
+            }
+            foreach (var blocker in context.BoundaryExistingWorkBlockers)
+            {
+                if (blocker.AgentId == agentId && blocker.Date == date)
+                {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
@@ -460,6 +486,32 @@ public sealed class Stage0HardConstraintChecker
         }
 
         foreach (var blocker in context.ExistingWorkBlockers)
+        {
+            if (blocker.AgentId != agent.Id)
+            {
+                continue;
+            }
+            if (GapHoursBelow(slotStartUtc, slotEndUtc, blocker.StartAt, blocker.EndAt, minRest))
+            {
+                return true;
+            }
+        }
+
+        // Boundary context: locked / existing works on days adjacent to the period also constrain
+        // the rest gap at the period start (Apr 30 late shift → May 1 early shift) and at the period end.
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            if (locked.AgentId != agent.Id)
+            {
+                continue;
+            }
+            if (GapHoursBelow(slotStartUtc, slotEndUtc, locked.StartAt, locked.EndAt, minRest))
+            {
+                return true;
+            }
+        }
+
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
         {
             if (blocker.AgentId != agent.Id)
             {

@@ -12,6 +12,12 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// MinPauseHours. Operates on the bitmap directly without converting to tokens.
 /// </summary>
 /// <param name="availability">Per (agent, date) availability map, supplied by the context builder</param>
+/// <param name="boundaryAssignments">
+/// Optional list of works/breaks on the days adjacent to the bitmap (BitmapInput.BoundaryAssignments).
+/// Used by MaxConsecutiveDays and MinPauseHours checks so runs and rest gaps that cross the bitmap
+/// edges (period start / period end) are detected. Cells in the bitmap itself are never affected;
+/// the engine never reads or mutates these entries.
+/// </param>
 public sealed class DomainAwareReplaceValidator : IReplaceValidator
 {
     private static readonly Calendar IsoCalendar = CultureInfo.InvariantCulture.Calendar;
@@ -19,10 +25,21 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     private const DayOfWeek FirstDayOfWeek = DayOfWeek.Monday;
 
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
+    private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
 
-    public DomainAwareReplaceValidator(IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? availability)
+    public DomainAwareReplaceValidator(
+        IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? availability,
+        IReadOnlyList<BitmapAssignment>? boundaryAssignments = null)
     {
         _availability = availability ?? new Dictionary<(string, DateOnly), DayAvailability>();
+        _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
+        if (boundaryAssignments is not null)
+        {
+            foreach (var assignment in boundaryAssignments)
+            {
+                _boundaryByKey[(assignment.AgentId, assignment.Date)] = assignment;
+            }
+        }
     }
 
     public bool IsValid(HarmonyBitmap bitmap, ReplaceMove move) => Diagnose(bitmap, move) is null;
@@ -191,7 +208,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         return null;
     }
 
-    private static string? DiagnoseMinPause(
+    private string? DiagnoseMinPause(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,
@@ -215,6 +232,19 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
                 }
             }
         }
+        else if (TryGetBoundaryAssignment(receivingAgent.Id, bitmap.Days[0].AddDays(-1), out var prevBoundary)
+                 && IsWorkingAssignment(prevBoundary)
+                 && prevBoundary.EndAt != default)
+        {
+            // Boundary context: previous day lies outside the bitmap (dayIndex == 0). Use the boundary
+            // assignment so a late shift on the last day of the previous period correctly constrains the
+            // first day of this period.
+            var pause = (decimal)(incomingCell.StartAt - prevBoundary.EndAt).TotalHours;
+            if (pause < receivingAgent.MinPauseHours)
+            {
+                return $"MinPauseHours violated: previous shift (boundary) ends {prevBoundary.EndAt:HH:mm}, new shift starts {incomingCell.StartAt:HH:mm} (pause {pause:F1}h, min {receivingAgent.MinPauseHours}h)";
+            }
+        }
 
         if (dayIndex + 1 < bitmap.DayCount)
         {
@@ -228,11 +258,30 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
                 }
             }
         }
+        else if (TryGetBoundaryAssignment(receivingAgent.Id, bitmap.Days[^1].AddDays(1), out var nextBoundary)
+                 && IsWorkingAssignment(nextBoundary)
+                 && nextBoundary.StartAt != default)
+        {
+            // Boundary context: next day lies outside the bitmap (dayIndex == DayCount - 1).
+            var pause = (decimal)(nextBoundary.StartAt - incomingCell.EndAt).TotalHours;
+            if (pause < receivingAgent.MinPauseHours)
+            {
+                return $"MinPauseHours violated: new shift ends {incomingCell.EndAt:HH:mm}, next shift (boundary) starts {nextBoundary.StartAt:HH:mm} (pause {pause:F1}h, min {receivingAgent.MinPauseHours}h)";
+            }
+        }
 
         return null;
     }
 
-    private static string? DiagnoseMaxConsecutiveDays(
+    private bool TryGetBoundaryAssignment(string agentId, DateOnly date, out BitmapAssignment assignment)
+    {
+        return _boundaryByKey.TryGetValue((agentId, date), out assignment!);
+    }
+
+    private static bool IsWorkingAssignment(BitmapAssignment assignment)
+        => IsWorkingDayCell(assignment.Symbol);
+
+    private string? DiagnoseMaxConsecutiveDays(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,
@@ -245,22 +294,48 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         }
 
         var run = 1;
+        var reachedStart = true;
         for (var d = dayIndex - 1; d >= 0; d--)
         {
             if (!IsWorkingDayCell(bitmap.GetCell(receivingRow, d).Symbol))
             {
+                reachedStart = false;
                 break;
             }
             run++;
         }
+        if (reachedStart && _boundaryByKey.Count > 0)
+        {
+            // Bitmap walk reached the start without a non-working cell — extend the run into the
+            // adjacent boundary days. A break or missing entry stops the walk (matches in-bitmap logic).
+            var probe = bitmap.Days[0].AddDays(-1);
+            while (TryGetBoundaryAssignment(receivingAgent.Id, probe, out var b) && IsWorkingAssignment(b))
+            {
+                run++;
+                probe = probe.AddDays(-1);
+            }
+        }
+
+        var reachedEnd = true;
         for (var d = dayIndex + 1; d < bitmap.DayCount; d++)
         {
             if (!IsWorkingDayCell(bitmap.GetCell(receivingRow, d).Symbol))
             {
+                reachedEnd = false;
                 break;
             }
             run++;
         }
+        if (reachedEnd && _boundaryByKey.Count > 0)
+        {
+            var probe = bitmap.Days[^1].AddDays(1);
+            while (TryGetBoundaryAssignment(receivingAgent.Id, probe, out var b) && IsWorkingAssignment(b))
+            {
+                run++;
+                probe = probe.AddDays(1);
+            }
+        }
+
         if (run > receivingAgent.MaxConsecutiveDays)
         {
             return $"MaxConsecutiveDays exceeded: run would be {run} days, cap is {receivingAgent.MaxConsecutiveDays}";

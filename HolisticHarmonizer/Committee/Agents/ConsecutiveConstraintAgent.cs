@@ -16,7 +16,31 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee.Agents;
 /// </summary>
 public sealed class ConsecutiveConstraintAgent : IConstraintAgent
 {
+    private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
+
     public string Name => "Consecutive";
+
+    public ConsecutiveConstraintAgent()
+        : this(boundaryAssignments: null)
+    {
+    }
+
+    /// <param name="boundaryAssignments">
+    /// Optional list of works/breaks on the days adjacent to the bitmap (BitmapInput.BoundaryAssignments).
+    /// Run-length walks that reach a bitmap edge continue into these adjacent days so a swap on day 0
+    /// or the last day correctly accounts for streaks crossing the period boundary.
+    /// </param>
+    public ConsecutiveConstraintAgent(IReadOnlyList<BitmapAssignment>? boundaryAssignments)
+    {
+        _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
+        if (boundaryAssignments is not null)
+        {
+            foreach (var assignment in boundaryAssignments)
+            {
+                _boundaryByKey[(assignment.AgentId, assignment.Date)] = assignment;
+            }
+        }
+    }
 
     public ConstraintAgentVerdict Evaluate(HarmonyBitmap before, PlanCellSwap swap)
     {
@@ -59,20 +83,52 @@ public sealed class ConsecutiveConstraintAgent : IConstraintAgent
         return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Abstain, "swap does not stress consecutive caps");
     }
 
-    private static int RunLength(HarmonyBitmap bitmap, int rowIndex, int dayIndex, CellSymbol symbolOnDay)
+    private int RunLength(HarmonyBitmap bitmap, int rowIndex, int dayIndex, CellSymbol symbolOnDay)
     {
         if (!IsWork(symbolOnDay)) return 0;
+        var agentId = bitmap.Rows[rowIndex].Id;
         var run = 1;
+
+        var reachedStart = true;
         for (var d = dayIndex - 1; d >= 0; d--)
         {
-            if (!IsWork(bitmap.GetCell(rowIndex, d).Symbol)) break;
+            if (!IsWork(bitmap.GetCell(rowIndex, d).Symbol))
+            {
+                reachedStart = false;
+                break;
+            }
             run++;
         }
+        if (reachedStart && _boundaryByKey.Count > 0)
+        {
+            var probe = bitmap.Days[0].AddDays(-1);
+            while (_boundaryByKey.TryGetValue((agentId, probe), out var b) && IsWork(b.Symbol))
+            {
+                run++;
+                probe = probe.AddDays(-1);
+            }
+        }
+
+        var reachedEnd = true;
         for (var d = dayIndex + 1; d < bitmap.DayCount; d++)
         {
-            if (!IsWork(bitmap.GetCell(rowIndex, d).Symbol)) break;
+            if (!IsWork(bitmap.GetCell(rowIndex, d).Symbol))
+            {
+                reachedEnd = false;
+                break;
+            }
             run++;
         }
+        if (reachedEnd && _boundaryByKey.Count > 0)
+        {
+            var probe = bitmap.Days[^1].AddDays(1);
+            while (_boundaryByKey.TryGetValue((agentId, probe), out var b) && IsWork(b.Symbol))
+            {
+                run++;
+                probe = probe.AddDays(1);
+            }
+        }
+
         return run;
     }
 
