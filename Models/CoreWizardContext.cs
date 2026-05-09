@@ -30,6 +30,24 @@ public class CoreWizardContext
     /// <summary>Unlocked existing Works in the period; veto source for Stage 0 only, never lifted into the genome.</summary>
     public IReadOnlyList<CoreExistingWorkBlocker> ExistingWorkBlockers { get; init; } = [];
 
+    /// <summary>
+    /// Breaks (Vacation/Sick/Absence) on the days adjacent to the period (within ContextDaysBefore/After of the request).
+    /// Provided for boundary-constraint validators (MaxConsecutiveDays/MinRestHours/MinRestDays) to detect runs that
+    /// cross period boundaries. The GA never plans these days, never scores them, never mutates them.
+    /// </summary>
+    public IReadOnlyList<CoreBreakBlocker> BoundaryBreakBlockers { get; init; } = [];
+
+    /// <summary>
+    /// LockedWorks (Confirmed/Approved/Closed) on the days adjacent to the period. Same purpose as BoundaryBreakBlockers
+    /// — boundary-only constraint validation, never lifted into the genome.
+    /// </summary>
+    public IReadOnlyList<CoreLockedWork> BoundaryLockedWorks { get; init; } = [];
+
+    /// <summary>
+    /// Unlocked existing Works on the days adjacent to the period. Used for the same boundary-only purpose.
+    /// </summary>
+    public IReadOnlyList<CoreExistingWorkBlocker> BoundaryExistingWorkBlockers { get; init; } = [];
+
     public int SchedulingMaxConsecutiveDays { get; init; } = 6;
 
     public double SchedulingMinPauseHours { get; init; } = 11;
