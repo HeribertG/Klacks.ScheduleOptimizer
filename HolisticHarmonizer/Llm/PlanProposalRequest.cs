@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Candidates;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
@@ -33,6 +34,11 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 /// prompt should emphasize this iteration. Defaults to <see cref="HolisticIntent.ConsolidateBlock"/>
 /// for backward compatibility. The LLM may still emit other allowed intents, but the
 /// focused one is the primary suggestion for this iteration.</param>
+/// <param name="CandidateMoves">Optional list of pre-validated swap candidates the host
+/// proposes for the focused intent. Each candidate has already passed the hard-constraint
+/// validator, so the LLM can pick from them without risking automatic rejection. The list
+/// is advisory — the LLM may combine candidates into a batch, ignore them entirely, or
+/// emit its own coordinates. Empty when no structural opportunity exists for this intent.</param>
 public sealed record PlanProposalRequest(
     string ModelId,
     string PlanText,
@@ -43,4 +49,5 @@ public sealed record PlanProposalRequest(
     int IterationIndex,
     IReadOnlyList<RejectMemoryEntry> PriorRejections,
     byte[]? PlanPng = null,
-    string FocusedIntent = HolisticIntent.ConsolidateBlock);
+    string FocusedIntent = HolisticIntent.ConsolidateBlock,
+    IReadOnlyList<MoveCandidate>? CandidateMoves = null);
