@@ -92,17 +92,17 @@ public sealed class ConsecutiveConstraintAgent : IConstraintAgent
         var reachedStart = true;
         for (var d = dayIndex - 1; d >= 0; d--)
         {
-            if (!IsWork(bitmap.GetCell(rowIndex, d).Symbol))
+            if (!IsCellOccupied(bitmap, rowIndex, d, agentId))
             {
                 reachedStart = false;
                 break;
             }
             run++;
         }
-        if (reachedStart && _boundaryByKey.Count > 0)
+        if (reachedStart)
         {
             var probe = bitmap.Days[0].AddDays(-1);
-            while (_boundaryByKey.TryGetValue((agentId, probe), out var b) && IsWork(b.Symbol))
+            while (IsBoundaryDateOccupied(agentId, probe))
             {
                 run++;
                 probe = probe.AddDays(-1);
@@ -112,17 +112,17 @@ public sealed class ConsecutiveConstraintAgent : IConstraintAgent
         var reachedEnd = true;
         for (var d = dayIndex + 1; d < bitmap.DayCount; d++)
         {
-            if (!IsWork(bitmap.GetCell(rowIndex, d).Symbol))
+            if (!IsCellOccupied(bitmap, rowIndex, d, agentId))
             {
                 reachedEnd = false;
                 break;
             }
             run++;
         }
-        if (reachedEnd && _boundaryByKey.Count > 0)
+        if (reachedEnd)
         {
             var probe = bitmap.Days[^1].AddDays(1);
-            while (_boundaryByKey.TryGetValue((agentId, probe), out var b) && IsWork(b.Symbol))
+            while (IsBoundaryDateOccupied(agentId, probe))
             {
                 run++;
                 probe = probe.AddDays(1);
@@ -131,6 +131,53 @@ public sealed class ConsecutiveConstraintAgent : IConstraintAgent
 
         return run;
     }
+
+    /// <summary>
+    /// True when the bitmap cell at (row, day) is a working symbol OR when the previous day's cell
+    /// holds a cross-midnight shift whose interval extends into this day. Mirrors the cross-day
+    /// semantics used by DomainAwareReplaceValidator and ScheduleBlock.TouchesDate.
+    /// </summary>
+    private bool IsCellOccupied(HarmonyBitmap bitmap, int row, int day, string agentId)
+    {
+        if (IsWork(bitmap.GetCell(row, day).Symbol)) return true;
+        if (day > 0)
+        {
+            var prev = bitmap.GetCell(row, day - 1);
+            if (CellCrossesMidnight(prev)) return true;
+        }
+        else
+        {
+            var prevDate = bitmap.Days[0].AddDays(-1);
+            if (_boundaryByKey.TryGetValue((agentId, prevDate), out var b)
+                && IsWork(b.Symbol)
+                && AssignmentCrossesMidnight(b))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private bool IsBoundaryDateOccupied(string agentId, DateOnly date)
+    {
+        if (_boundaryByKey.TryGetValue((agentId, date), out var anchor) && IsWork(anchor.Symbol))
+        {
+            return true;
+        }
+        if (_boundaryByKey.TryGetValue((agentId, date.AddDays(-1)), out var prev)
+            && IsWork(prev.Symbol)
+            && AssignmentCrossesMidnight(prev))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    private static bool CellCrossesMidnight(Cell cell)
+        => cell.StartAt != default && cell.EndAt != default && cell.EndAt.Date > cell.StartAt.Date;
+
+    private static bool AssignmentCrossesMidnight(BitmapAssignment a)
+        => a.StartAt != default && a.EndAt != default && a.EndAt.Date > a.StartAt.Date;
 
     private static bool IsWork(CellSymbol symbol)
         => symbol == CellSymbol.Early || symbol == CellSymbol.Late || symbol == CellSymbol.Night || symbol == CellSymbol.Other;

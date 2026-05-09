@@ -361,42 +361,53 @@ public sealed class Stage0HardConstraintChecker
     }
 
     /// <summary>
-    /// Checks whether the agent has any work on a given date — including boundary works outside
-    /// [PeriodFrom, PeriodUntil]. A break on the date is NOT a work and the consecutive walk stops there
-    /// (matches the in-period semantics where a free or break day breaks the streak).
+    /// Checks whether the agent has any work on a given date — including:
+    ///   1. Direct anchor (work starts on this date), and
+    ///   2. Cross-day shifts (e.g. a night shift that started the previous day and ends in the morning
+    ///      of this date — the morning hours of <paramref name="date"/> are still occupied).
+    /// Boundary works outside [PeriodFrom, PeriodUntil] are consulted with the same semantics.
+    /// A break on the date is NOT a work and the consecutive walk stops there (matches the in-period
+    /// semantics where a free or break day breaks the streak).
     /// </summary>
     private static bool HasWorkOnDate(
         string agentId, DateOnly date, IReadOnlyList<CoreToken> assigned, CoreWizardContext context)
     {
         foreach (var t in assigned)
         {
-            if (t.AgentId == agentId && t.Date == date)
+            if (t.AgentId == agentId && OccupiesDate(t.StartAt, t.EndAt, date))
             {
                 return true;
             }
         }
 
-        // Boundary context: works on days adjacent to the period count toward MaxConsecutiveDays runs
-        // crossing the period start or end, but are never planned by the GA.
-        if (date < context.PeriodFrom || date > context.PeriodUntil)
+        foreach (var locked in context.BoundaryLockedWorks)
         {
-            foreach (var locked in context.BoundaryLockedWorks)
+            if (locked.AgentId == agentId && OccupiesDate(locked.StartAt, locked.EndAt, date))
             {
-                if (locked.AgentId == agentId && locked.Date == date)
-                {
-                    return true;
-                }
+                return true;
             }
-            foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        }
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            if (blocker.AgentId == agentId && OccupiesDate(blocker.StartAt, blocker.EndAt, date))
             {
-                if (blocker.AgentId == agentId && blocker.Date == date)
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Returns true when the (StartAt, EndAt) interval overlaps any minute of <paramref name="target"/>.
+    /// Recognises cross-midnight shifts: a Night work on Apr 28 22:00 → Apr 29 07:00 occupies BOTH
+    /// Apr 28 and Apr 29 for streak/availability purposes.
+    /// </summary>
+    private static bool OccupiesDate(DateTime startAt, DateTime endAt, DateOnly target)
+    {
+        var dayStart = target.ToDateTime(TimeOnly.MinValue);
+        var dayEnd = dayStart.AddDays(1);
+        return startAt < dayEnd && endAt > dayStart;
     }
 
     private static bool HasOverlappingShift(

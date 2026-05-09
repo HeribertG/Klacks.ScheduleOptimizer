@@ -293,23 +293,24 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             return null;
         }
 
+        var agentId = bitmap.Rows[receivingRow].Id;
         var run = 1;
         var reachedStart = true;
         for (var d = dayIndex - 1; d >= 0; d--)
         {
-            if (!IsWorkingDayCell(bitmap.GetCell(receivingRow, d).Symbol))
+            if (!IsCellOccupied(bitmap, receivingRow, d, agentId))
             {
                 reachedStart = false;
                 break;
             }
             run++;
         }
-        if (reachedStart && _boundaryByKey.Count > 0)
+        if (reachedStart)
         {
             // Bitmap walk reached the start without a non-working cell — extend the run into the
             // adjacent boundary days. A break or missing entry stops the walk (matches in-bitmap logic).
             var probe = bitmap.Days[0].AddDays(-1);
-            while (TryGetBoundaryAssignment(receivingAgent.Id, probe, out var b) && IsWorkingAssignment(b))
+            while (IsBoundaryDateOccupied(agentId, probe))
             {
                 run++;
                 probe = probe.AddDays(-1);
@@ -319,17 +320,17 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         var reachedEnd = true;
         for (var d = dayIndex + 1; d < bitmap.DayCount; d++)
         {
-            if (!IsWorkingDayCell(bitmap.GetCell(receivingRow, d).Symbol))
+            if (!IsCellOccupied(bitmap, receivingRow, d, agentId))
             {
                 reachedEnd = false;
                 break;
             }
             run++;
         }
-        if (reachedEnd && _boundaryByKey.Count > 0)
+        if (reachedEnd)
         {
             var probe = bitmap.Days[^1].AddDays(1);
-            while (TryGetBoundaryAssignment(receivingAgent.Id, probe, out var b) && IsWorkingAssignment(b))
+            while (IsBoundaryDateOccupied(agentId, probe))
             {
                 run++;
                 probe = probe.AddDays(1);
@@ -342,6 +343,59 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         }
         return null;
     }
+
+    /// <summary>
+    /// Returns true if the bitmap cell at (row, day) is a working symbol OR if the previous day's cell
+    /// holds a cross-midnight shift whose interval extends into this day. This catches the case where
+    /// e.g. a Night cell on day d-1 ends at 07:00 of day d — the morning of day d is occupied even
+    /// though the bitmap symbol on day d may be Free.
+    /// </summary>
+    private bool IsCellOccupied(HarmonyBitmap bitmap, int row, int day, string agentId)
+    {
+        if (IsWorkingDayCell(bitmap.GetCell(row, day).Symbol)) return true;
+        if (day > 0)
+        {
+            var prev = bitmap.GetCell(row, day - 1);
+            if (CellCrossesMidnight(prev)) return true;
+        }
+        else
+        {
+            // Day 0 — check boundary entry on the previous calendar day for a cross-midnight shift.
+            var prevDate = bitmap.Days[0].AddDays(-1);
+            if (TryGetBoundaryAssignment(agentId, prevDate, out var b)
+                && IsWorkingAssignment(b)
+                && AssignmentCrossesMidnight(b))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true if a boundary entry occupies <paramref name="date"/> — either by direct anchor
+    /// (entry's date == target) or by cross-midnight extension from the previous day.
+    /// </summary>
+    private bool IsBoundaryDateOccupied(string agentId, DateOnly date)
+    {
+        if (TryGetBoundaryAssignment(agentId, date, out var anchor) && IsWorkingAssignment(anchor))
+        {
+            return true;
+        }
+        if (TryGetBoundaryAssignment(agentId, date.AddDays(-1), out var prev)
+            && IsWorkingAssignment(prev)
+            && AssignmentCrossesMidnight(prev))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    private static bool CellCrossesMidnight(Cell cell)
+        => cell.StartAt != default && cell.EndAt != default && cell.EndAt.Date > cell.StartAt.Date;
+
+    private static bool AssignmentCrossesMidnight(BitmapAssignment a)
+        => a.StartAt != default && a.EndAt != default && a.EndAt.Date > a.StartAt.Date;
 
     private static bool IsWorkingDayCell(CellSymbol symbol)
     {
