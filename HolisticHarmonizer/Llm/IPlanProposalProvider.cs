@@ -19,10 +19,10 @@ public interface IPlanProposalProvider
     Task<PlanProposalPingResult> PingAsync(string modelId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Sends a realistic mini-schedule (3 agents × 5 days with an obvious swap candidate) and
-    /// validates the response: parseable JSON, non-empty <c>swaps</c> array, valid coordinates.
-    /// Slower than <see cref="PingAsync"/> (up to 90 s) but catches reasoning models that pass
-    /// the trivial ping yet fail on full Holistic Harmonizer runs.
+    /// Sends a small PNG containing a deterministic secret token and verifies the model can read
+    /// the token back. Holistic Harmonizer / Wizard 3 mutate a bitmap representation, so any model
+    /// that silently drops the attached image is unsuitable. Slower than <see cref="PingAsync"/>
+    /// (up to 90 s per model) but the only reliable filter for vision capability.
     /// </summary>
     Task<PlanProposalPingResult> CapabilityCheckAsync(string modelId, CancellationToken cancellationToken);
 
