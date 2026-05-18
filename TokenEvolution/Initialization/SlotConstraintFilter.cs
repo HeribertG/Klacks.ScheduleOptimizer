@@ -63,7 +63,7 @@ public static class SlotConstraintFilter
             return false;
         }
 
-        if (ViolatesMinRestDays(agent, date, alreadyAssigned))
+        if (ViolatesMinRestDays(agent, date, alreadyAssigned, context))
         {
             return false;
         }
@@ -76,6 +76,11 @@ public static class SlotConstraintFilter
             }
 
             if (HasOverlappingExistingWork(agent.Id, slotStartUtc.Value, slotEndUtc.Value, context.ExistingWorkBlockers))
+            {
+                return false;
+            }
+
+            if (HasOverlappingExistingWork(agent.Id, slotStartUtc.Value, slotEndUtc.Value, context.BoundaryExistingWorkBlockers))
             {
                 return false;
             }
@@ -172,6 +177,30 @@ public static class SlotConstraintFilter
             }
         }
 
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            if (locked.AgentId != agent.Id)
+            {
+                continue;
+            }
+            if (GapHoursBelow(slotStart, slotEnd, locked.StartAt, locked.EndAt, minRest))
+            {
+                return true;
+            }
+        }
+
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            if (blocker.AgentId != agent.Id)
+            {
+                continue;
+            }
+            if (GapHoursBelow(slotStart, slotEnd, blocker.StartAt, blocker.EndAt, minRest))
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -203,8 +232,8 @@ public static class SlotConstraintFilter
             ? agent.MaxConsecutiveDays
             : context.SchedulingMaxConsecutiveDays;
 
-        var before = CountConsecutive(agent.Id, date, assigned, step: -1);
-        var after = CountConsecutive(agent.Id, date, assigned, step: +1);
+        var before = CountConsecutive(agent.Id, date, assigned, context, step: -1);
+        var after = CountConsecutive(agent.Id, date, assigned, context, step: +1);
         var runLength = before + 1 + after;
 
         if (softCap > 0 && runLength > softCap)
@@ -223,19 +252,20 @@ public static class SlotConstraintFilter
     private static bool ViolatesMinRestDays(
         CoreAgent agent,
         DateOnly date,
-        IReadOnlyList<CoreToken> assigned)
+        IReadOnlyList<CoreToken> assigned,
+        CoreWizardContext context)
     {
         if (agent.MinRestDays <= 0)
         {
             return false;
         }
 
-        var hasPrev = HasAssignmentOnDate(agent.Id, date.AddDays(-1), assigned);
-        var hasNext = HasAssignmentOnDate(agent.Id, date.AddDays(+1), assigned);
+        var hasPrev = HasAssignmentOnDate(agent.Id, date.AddDays(-1), assigned, context);
+        var hasNext = HasAssignmentOnDate(agent.Id, date.AddDays(+1), assigned, context);
 
         if (!hasPrev)
         {
-            var lastBefore = FindNearestOccupiedDate(agent.Id, date, assigned, step: -1);
+            var lastBefore = FindNearestOccupiedDate(agent.Id, date, assigned, context, step: -1);
             if (lastBefore.HasValue)
             {
                 var gap = (date.DayNumber - lastBefore.Value.DayNumber) - 1;
@@ -248,7 +278,7 @@ public static class SlotConstraintFilter
 
         if (!hasNext)
         {
-            var firstAfter = FindNearestOccupiedDate(agent.Id, date, assigned, step: +1);
+            var firstAfter = FindNearestOccupiedDate(agent.Id, date, assigned, context, step: +1);
             if (firstAfter.HasValue)
             {
                 var gap = (firstAfter.Value.DayNumber - date.DayNumber) - 1;
@@ -266,6 +296,7 @@ public static class SlotConstraintFilter
         string agentId,
         DateOnly anchor,
         IReadOnlyList<CoreToken> assigned,
+        CoreWizardContext context,
         int step)
     {
         DateOnly? best = null;
@@ -276,6 +307,24 @@ public static class SlotConstraintFilter
             if (CrossesMidnight(token))
             {
                 ConsiderDate(DateOnly.FromDateTime(token.EndAt), anchor, step, ref best);
+            }
+        }
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            if (locked.AgentId != agentId) continue;
+            ConsiderDate(locked.Date, anchor, step, ref best);
+            if (locked.EndAt.Date > locked.StartAt.Date)
+            {
+                ConsiderDate(DateOnly.FromDateTime(locked.EndAt), anchor, step, ref best);
+            }
+        }
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            if (blocker.AgentId != agentId) continue;
+            ConsiderDate(blocker.Date, anchor, step, ref best);
+            if (blocker.EndAt.Date > blocker.StartAt.Date)
+            {
+                ConsiderDate(DateOnly.FromDateTime(blocker.EndAt), anchor, step, ref best);
             }
         }
         return best;
@@ -333,11 +382,12 @@ public static class SlotConstraintFilter
         string agentId,
         DateOnly anchor,
         IReadOnlyList<CoreToken> assigned,
+        CoreWizardContext context,
         int step)
     {
         var count = 0;
         var probe = anchor.AddDays(step);
-        while (HasAssignmentOnDate(agentId, probe, assigned))
+        while (HasAssignmentOnDate(agentId, probe, assigned, context))
         {
             count++;
             probe = probe.AddDays(step);
@@ -349,17 +399,41 @@ public static class SlotConstraintFilter
     private static bool HasAssignmentOnDate(
         string agentId,
         DateOnly date,
-        IReadOnlyList<CoreToken> assigned)
+        IReadOnlyList<CoreToken> assigned,
+        CoreWizardContext context)
     {
         foreach (var token in assigned)
         {
-            if (token.AgentId == agentId && token.Date == date)
+            if (token.AgentId == agentId && OccupiesDate(token.StartAt, token.EndAt, date))
+            {
+                return true;
+            }
+        }
+
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            if (locked.AgentId == agentId && OccupiesDate(locked.StartAt, locked.EndAt, date))
+            {
+                return true;
+            }
+        }
+
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            if (blocker.AgentId == agentId && OccupiesDate(blocker.StartAt, blocker.EndAt, date))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static bool OccupiesDate(DateTime startAt, DateTime endAt, DateOnly target)
+    {
+        var dayStart = target.ToDateTime(TimeOnly.MinValue);
+        var dayEnd = dayStart.AddDays(1);
+        return startAt < dayEnd && endAt > dayStart;
     }
 
     private static bool RespectsWeekday(CoreAgent agent, DayOfWeek day) => day switch

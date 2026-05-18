@@ -27,7 +27,7 @@ public sealed class MaxPossibleCalculator
                     continue;
                 }
 
-                total += shift.Hours;
+                total += shift.Hours + EstimateSurcharge(agent, shift);
             }
 
             if (agent.MaximumHours > 0)
@@ -112,4 +112,21 @@ public sealed class MaxPossibleCalculator
         ScheduleCommandKeyword.NoNight => shiftTypeIndex == 2,
         _ => false,
     };
+
+    private static double EstimateSurcharge(CoreAgent agent, CoreShift shift)
+    {
+        if (!DateOnly.TryParse(shift.Date, out var date) || shift.Hours <= 0)
+        {
+            return 0;
+        }
+        var shiftTypeIndex = TimeOnly.TryParse(shift.StartTime, out var start)
+            ? ShiftTypeInference.FromStartTime(start)
+            : 0;
+        decimal rate = 0;
+        if (shiftTypeIndex == 2) rate += agent.NightRate;
+        if (date.DayOfWeek == DayOfWeek.Saturday) rate += agent.SaRate;
+        if (date.DayOfWeek == DayOfWeek.Sunday) rate += agent.SoRate;
+        if (rate <= 0) return 0;
+        return shift.Hours * (double)rate;
+    }
 }

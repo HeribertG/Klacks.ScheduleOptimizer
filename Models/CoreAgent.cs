@@ -58,4 +58,16 @@ public record CoreAgent(
     public bool WorkOnSaturday { get; init; } = false;
 
     public bool WorkOnSunday { get; init; } = false;
+
+    /// <summary>Surcharge percentage for night shifts (e.g. 25 = 25%). Used by the wizard for rough surcharge estimation toward GuaranteedHours.</summary>
+    public decimal NightRate { get; init; } = 0;
+
+    /// <summary>Surcharge percentage for holiday shifts.</summary>
+    public decimal HolidayRate { get; init; } = 0;
+
+    /// <summary>Surcharge percentage for Saturday shifts.</summary>
+    public decimal SaRate { get; init; } = 0;
+
+    /// <summary>Surcharge percentage for Sunday shifts.</summary>
+    public decimal SoRate { get; init; } = 0;
 }

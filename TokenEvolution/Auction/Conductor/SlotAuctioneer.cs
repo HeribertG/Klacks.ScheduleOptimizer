@@ -47,7 +47,11 @@ public sealed class SlotAuctioneer
         var states = new Dictionary<string, AgentRuntimeState>(StringComparer.Ordinal);
         foreach (var agent in context.Agents)
         {
-            states[agent.Id] = AgentRuntimeState.Initial(agent.Id);
+            states[agent.Id] = AgentRuntimeState.InitialFromBoundary(
+                agent.Id,
+                context.PeriodFrom,
+                context.BoundaryLockedWorks,
+                context.BoundaryExistingWorkBlockers);
         }
 
         var escalation = new EscalationLog();
@@ -62,7 +66,8 @@ public sealed class SlotAuctioneer
                 continue;
             }
 
-            var token = BuildToken(slot, result.WinnerAgentId);
+            var winnerAgent = context.Agents.FirstOrDefault(a => a.Id == result.WinnerAgentId);
+            var token = BuildToken(slot, result.WinnerAgentId, winnerAgent);
             tokens.Add(token);
 
             if (states.TryGetValue(result.WinnerAgentId, out var prev))
@@ -135,18 +140,19 @@ public sealed class SlotAuctioneer
         return new AuctionResult(slotId, null, 3, bids, vetos);
     }
 
-    private static CoreToken BuildToken(CoreShift slot, string agentId)
+    private static CoreToken BuildToken(CoreShift slot, string agentId, CoreAgent? agent)
     {
         var date = DateOnly.Parse(slot.Date);
         var start = TimeOnly.TryParse(slot.StartTime, out var s) ? s : new TimeOnly(8, 0);
         var end = TimeOnly.TryParse(slot.EndTime, out var e) ? e : start.AddHours(8);
         var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
+        var totalHours = (decimal)slot.Hours;
 
         return new CoreToken(
             WorkIds: [],
             ShiftTypeIndex: shiftTypeIndex,
             Date: date,
-            TotalHours: (decimal)slot.Hours,
+            TotalHours: totalHours,
             StartAt: date.ToDateTime(start),
             EndAt: end <= start ? date.AddDays(1).ToDateTime(end) : date.ToDateTime(end),
             BlockId: Guid.NewGuid(),
@@ -154,7 +160,31 @@ public sealed class SlotAuctioneer
             IsLocked: false,
             LocationContext: null,
             ShiftRefId: Guid.TryParse(slot.Id, out var sr) ? sr : Guid.Empty,
-            AgentId: agentId);
+            AgentId: agentId)
+        {
+            Surcharges = EstimateSurcharges(totalHours, shiftTypeIndex, date, agent),
+        };
+    }
+
+    /// <summary>
+    /// Rough surcharge estimate for the wizard planning fitness: applies the agent's contract rates
+    /// (Night/Sa/So) by shift type and weekday. Rates are stored as multipliers (0.10 = 10%), so the
+    /// estimate is simply hours x rate. Holiday rate is intentionally skipped because the wizard
+    /// does not load calendar selections — the actual surcharge will be computed precisely by
+    /// WorkMacroService at apply time.
+    /// </summary>
+    private static decimal EstimateSurcharges(decimal totalHours, int shiftTypeIndex, DateOnly date, CoreAgent? agent)
+    {
+        if (agent is null || totalHours <= 0)
+        {
+            return 0m;
+        }
+        var rate = 0m;
+        if (shiftTypeIndex == 2) rate += agent.NightRate;
+        if (date.DayOfWeek == DayOfWeek.Saturday) rate += agent.SaRate;
+        if (date.DayOfWeek == DayOfWeek.Sunday) rate += agent.SoRate;
+        if (rate <= 0) return 0m;
+        return totalHours * rate;
     }
 
     private static AgentRuntimeState ApplyAssignmentToState(AgentRuntimeState prev, CoreToken token)

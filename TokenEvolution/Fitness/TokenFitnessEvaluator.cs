@@ -128,7 +128,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var flags = new List<int>(_agentsInPriorityOrder.Count);
         var tokensByAgent = scenario.Tokens
             .GroupBy(t => t.AgentId)
-            .ToDictionary(g => g.Key, g => g.Sum(t => (double)t.TotalHours));
+            .ToDictionary(g => g.Key, g => g.Sum(t => (double)(t.TotalHours + t.Surcharges)));
         var breakHoursByAgent = ComputeBreakHoursByAgent(context);
         var agentLookup = context.Agents.ToDictionary(a => a.Id);
 

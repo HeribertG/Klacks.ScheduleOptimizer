@@ -24,4 +24,8 @@ public record CoreLockedWork(
     DateTime StartAt,
     DateTime EndAt,
     Guid ShiftRefId,
-    string? LocationContext);
+    string? LocationContext)
+{
+    /// <summary>Real Surcharges from the DB Work entity, used by the wizard fitness for combined GuaranteedHours accounting.</summary>
+    public decimal Surcharges { get; init; } = 0;
+}

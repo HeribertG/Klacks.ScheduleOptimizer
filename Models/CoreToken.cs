@@ -31,4 +31,8 @@ public record CoreToken(
     bool IsLocked,
     string? LocationContext,
     Guid ShiftRefId,
-    string AgentId);
+    string AgentId)
+{
+    /// <summary>Estimated surcharge hours (Night/Sa/So/Holiday) used by the wizard fitness to reach combined GuaranteedHours.</summary>
+    public decimal Surcharges { get; init; } = 0;
+}

@@ -80,7 +80,10 @@ public static class LockedTokenFactory
                     IsLocked: true,
                     LocationContext: work.LocationContext,
                     ShiftRefId: work.ShiftRefId,
-                    AgentId: work.AgentId));
+                    AgentId: work.AgentId)
+                {
+                    Surcharges = work.Surcharges,
+                });
             }
         }
 
