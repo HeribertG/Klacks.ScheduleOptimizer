@@ -32,6 +32,7 @@ public static class DefaultLinguisticVariables
         dict["DaysSinceEarly"] = DaysSinceVariable("DaysSinceEarly");
         dict["DaysSinceLate"] = DaysSinceVariable("DaysSinceLate");
         dict["DaysSinceNight"] = DaysSinceVariable("DaysSinceNight");
+        dict["SlotDaysSince"] = DaysSinceVariable("SlotDaysSince");
 
         dict["WeeklyLoad"] = new("WeeklyLoad", new Dictionary<string, MembershipFunction>
         {

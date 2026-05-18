@@ -2,6 +2,7 @@
 
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.Common.Fuzzy;
+using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Agent;
 
@@ -52,6 +53,8 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
 
         var indexBonus = ResolveIndexBonus(agent, context);
 
+        var slotTypeIndex = ShiftTypeInference.FromStartTimeString(slot.StartTime);
+
         return new Dictionary<string, double>(StringComparer.Ordinal)
         {
             ["BlockHunger"] = blockHunger,
@@ -59,6 +62,7 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
             ["DaysSinceEarly"] = ToDouble(state.DaysSinceShiftType, 0),
             ["DaysSinceLate"] = ToDouble(state.DaysSinceShiftType, 1),
             ["DaysSinceNight"] = ToDouble(state.DaysSinceShiftType, 2),
+            ["SlotDaysSince"] = ToDouble(state.DaysSinceShiftType, slotTypeIndex),
             ["WeeklyLoad"] = weeklyLoad,
             ["IndexBonus"] = indexBonus,
         };
