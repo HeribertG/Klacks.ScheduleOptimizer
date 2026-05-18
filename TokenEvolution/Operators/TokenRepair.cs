@@ -11,6 +11,10 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// For token-bound violations (MaxDailyHours, keyword, etc.) the operator removes an offending
 /// non-locked token. For slot-bound <see cref="ViolationKind.UnderSupply"/> violations it tries
 /// to ADD a valid token filling the missing slot. Locked tokens are never mutated.
+/// Index-aware: UnderSupply picks the new agent with top-bias (Top roster position wins more
+/// often), OverSupply and RemoveOffendingToken pick the doomed token with bottom-bias (Bottom
+/// roster position loses its slot more often). Together with <see cref="ReassignMutation"/>
+/// this gives ~35% of GA mutation calls a top-down distribution pull.
 /// </summary>
 public sealed class TokenRepair : ITokenOperator
 {
@@ -118,7 +122,7 @@ public sealed class TokenRepair : ITokenOperator
             return TokenSwapMutation.CloneScenario(context.Primary, context.Primary.Tokens.ToList());
         }
 
-        var doomed = candidates[context.Rng.Next(candidates.Count)];
+        var doomed = RosterPositionBias.PickWithBottomBias(candidates, t => t.AgentId, context.Wizard.Agents, context.Rng);
         var remaining = context.Primary.Tokens.Where(t => t != doomed).ToList();
         return TokenSwapMutation.CloneScenario(context.Primary, remaining);
     }
@@ -168,7 +172,7 @@ public sealed class TokenRepair : ITokenOperator
             return TokenSwapMutation.CloneScenario(context.Primary, tokens);
         }
 
-        var chosen = candidates[context.Rng.Next(candidates.Count)];
+        var chosen = RosterPositionBias.PickWithTopBias(candidates, a => a.Id, context.Wizard.Agents, context.Rng);
         tokens.Add(new CoreToken(
             WorkIds: [],
             ShiftTypeIndex: shiftTypeIndex,
@@ -206,7 +210,7 @@ public sealed class TokenRepair : ITokenOperator
             return TokenSwapMutation.CloneScenario(context.Primary, tokens);
         }
 
-        var doomed = candidates[context.Rng.Next(candidates.Count)];
+        var doomed = RosterPositionBias.PickWithBottomBias(candidates, t => t.AgentId, context.Wizard.Agents, context.Rng);
         var remaining = tokens.Where(t => t != doomed).ToList();
         return TokenSwapMutation.CloneScenario(context.Primary, remaining);
     }

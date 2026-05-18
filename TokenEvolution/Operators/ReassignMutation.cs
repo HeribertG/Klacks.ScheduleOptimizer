@@ -7,7 +7,11 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 
 /// <summary>
 /// M5: Reassigns one non-locked token to a different agent that is still valid for the slot.
-/// Most aggressive operator; used sparingly via MutationWeights.
+/// Index-aware: prefers candidates with a lower position in context.Agents (top-down list order),
+/// so the GA drifts towards the architecture intent that earlier agents in the roster carry more
+/// load. Without this bias, constraints and path-dependence systematically push slots to the
+/// bottom of the roster — observed empirically on homogeneous full-time teams. Most aggressive
+/// operator; used sparingly via MutationWeights.
 /// </summary>
 public sealed class ReassignMutation : ITokenOperator
 {
@@ -37,7 +41,7 @@ public sealed class ReassignMutation : ITokenOperator
             return TokenSwapMutation.CloneScenario(context.Primary, tokens);
         }
 
-        var newAgent = validAgents[context.Rng.Next(validAgents.Count)];
+        var newAgent = RosterPositionBias.PickWithTopBias(validAgents, a => a.Id, context.Wizard.Agents, context.Rng);
         tokens[chosen.Index] = currentToken with { AgentId = newAgent.Id };
         return TokenSwapMutation.CloneScenario(context.Primary, tokens);
     }
