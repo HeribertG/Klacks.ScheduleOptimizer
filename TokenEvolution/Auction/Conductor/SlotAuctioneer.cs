@@ -8,11 +8,11 @@ using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Conductor;
 
 /// <summary>
-/// Layer 1 — Dirigent. Iterates slots in chronological order. Per slot, agents are offered the
-/// slot in strict index order (= position in context.Agents). The first agent that accepts
-/// (fuzzy bid score &gt;= AcceptanceThreshold AND no Stage-0/Stage-1 veto) wins the slot.
-/// If nobody accepts in Round 1, Stage-1 vetos are relaxed (Round 2). If nobody is Stage-0-clean,
-/// the slot stays unassigned (Round 3) — no force-assign.
+/// Layer 1 — Dirigent. Iterates slots in chronological order. Per slot, every agent submits a bid;
+/// the highest-scoring Stage-0+Stage-1-clean bid above AcceptanceThreshold wins Round 1.
+/// If no bid is Stage-1-clean, the highest-scoring Stage-0-clean bid wins Round 2 (escalation
+/// logged). If no agent is Stage-0-clean, the slot stays unassigned (Round 3) — no force-assign.
+/// Ties on score are broken by AgentId (ordinal) for determinism.
 /// </summary>
 public sealed class SlotAuctioneer
 {
@@ -95,8 +95,8 @@ public sealed class SlotAuctioneer
         var vetos = new List<VetoVerdict>(context.Agents.Count);
         var slotId = $"{slot.Date}/{slot.Id}";
 
-        Bid? round2Fallback = null;
-        VetoVerdict? round2FallbackV1 = null;
+        var round1Candidates = new List<Bid>();
+        var round2Candidates = new List<(Bid Bid, VetoVerdict V1)>();
 
         foreach (var agent in context.Agents)
         {
@@ -114,27 +114,39 @@ public sealed class SlotAuctioneer
             if (v1 != null)
             {
                 vetos.Add(v1);
-                if (round2Fallback is null && bid.Score >= AcceptanceThreshold)
+                if (bid.Score >= AcceptanceThreshold)
                 {
-                    round2Fallback = bid;
-                    round2FallbackV1 = v1;
+                    round2Candidates.Add((bid, v1));
                 }
                 continue;
             }
 
             if (bid.Score >= AcceptanceThreshold)
             {
-                return new AuctionResult(slotId, agent.Id, 1, bids, vetos);
+                round1Candidates.Add(bid);
             }
         }
 
-        if (round2Fallback != null)
+        if (round1Candidates.Count > 0)
         {
-            if (DateOnly.TryParse(slot.Date, out var date) && round2FallbackV1 != null)
+            var winner = round1Candidates
+                .OrderByDescending(b => b.Score)
+                .ThenBy(b => b.AgentId, StringComparer.Ordinal)
+                .First();
+            return new AuctionResult(slotId, winner.AgentId, 1, bids, vetos);
+        }
+
+        if (round2Candidates.Count > 0)
+        {
+            var winner = round2Candidates
+                .OrderByDescending(c => c.Bid.Score)
+                .ThenBy(c => c.Bid.AgentId, StringComparer.Ordinal)
+                .First();
+            if (DateOnly.TryParse(slot.Date, out var date))
             {
-                escalation.Record(round2Fallback.AgentId, date, round2FallbackV1);
+                escalation.Record(winner.Bid.AgentId, date, winner.V1);
             }
-            return new AuctionResult(slotId, round2Fallback.AgentId, 2, bids, vetos);
+            return new AuctionResult(slotId, winner.Bid.AgentId, 2, bids, vetos);
         }
 
         return new AuctionResult(slotId, null, 3, bids, vetos);
