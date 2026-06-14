@@ -28,7 +28,17 @@ public static class SlotConstraintFilter
         DateTime? slotStartUtc = null,
         DateTime? slotEndUtc = null)
     {
-        if (!RespectsWeekday(agent, date.DayOfWeek))
+        // Per-date contract availability wins over the static weekday flags: a contract starting
+        // or ending mid-period makes individual days non-workable regardless of the weekday.
+        var worksOnDate = context.WorksOnDate(agent.Id, date);
+        if (worksOnDate.HasValue)
+        {
+            if (!worksOnDate.Value)
+            {
+                return false;
+            }
+        }
+        else if (!RespectsWeekday(agent, date.DayOfWeek))
         {
             return false;
         }

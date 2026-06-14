@@ -37,6 +37,9 @@ public sealed record TokenEvolutionConfig
     /// <summary>Share of auction-built scenarios in the initial population (0..1). Default 0.5.</summary>
     public double InitAuctionRatio { get; init; } = 0.5;
 
+    /// <summary>Stage-1 exponential decay factor per roster rank (0..1). Weights WHO reaches the guaranteed hours: 1.0 = every agent counts equally (index-blind), lower = satisfying top-roster agents dominates. Implements the top-down roster rule.</summary>
+    public double FitnessStage1RankDecay { get; init; } = 0.85;
+
     /// <summary>Stage-2 exponential decay factor per rank position (0..1). Lower = steeper priority towards top-ranked agents.</summary>
     public double FitnessStage2Decay { get; init; } = 0.7;
 
@@ -51,4 +54,7 @@ public sealed record TokenEvolutionConfig
 
     /// <summary>Stage-3 weight for staying within the optimal intra-day gap between tokens.</summary>
     public double FitnessStage3MaxGap { get; init; } = 0.1;
+
+    /// <summary>Optional soft wall-clock budget. When exceeded the loop stops at the next generation boundary and returns the best solution found so far. Null = no time limit.</summary>
+    public TimeSpan? MaxRuntime { get; init; }
 }

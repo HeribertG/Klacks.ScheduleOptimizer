@@ -101,6 +101,12 @@ public sealed class TokenEvolutionLoop
         for (var generation = 1; generation <= config.MaxGenerations; generation++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (config.MaxRuntime is { } maxRuntime && sw.Elapsed >= maxRuntime)
+            {
+                trace?.Invoke($"Run: soft time budget of {maxRuntime.TotalSeconds:F0}s reached before gen={generation}; returning best so far");
+                break;
+            }
+
             var genStart = sw.ElapsedMilliseconds;
 
             var next = population

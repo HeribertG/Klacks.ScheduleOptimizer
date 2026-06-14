@@ -35,8 +35,9 @@ public sealed class HarmonizerEvolutionLoop
         IProgress<EvolutionGenerationProgress>? progress = null,
         CancellationToken ct = default)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var random = _config.Seed.HasValue ? new Random(_config.Seed.Value) : new Random();
-        var population = InitialisePopulation(seed, random, ct);
+        var population = InitialisePopulation(seed, random, ct, stopwatch);
         var generationFitness = new List<double>(_config.MaxGenerations + 1);
         var bestSoFar = population[0];
         generationFitness.Add(bestSoFar.Fitness);
@@ -46,6 +47,11 @@ public sealed class HarmonizerEvolutionLoop
         for (var generation = 0; generation < _config.MaxGenerations; generation++)
         {
             ct.ThrowIfCancellationRequested();
+            if (BudgetExceeded(stopwatch))
+            {
+                break;
+            }
+
             var nextGen = new List<Individual>(_config.PopulationSize);
             for (var e = 0; e < _config.EliteCount && e < population.Count; e++)
             {
@@ -55,9 +61,19 @@ public sealed class HarmonizerEvolutionLoop
             while (nextGen.Count < _config.PopulationSize)
             {
                 ct.ThrowIfCancellationRequested();
+                if (BudgetExceeded(stopwatch))
+                {
+                    break;
+                }
+
                 var parent = SelectByTournament(population, random);
                 var child = ProduceChild(parent, random, ct);
                 nextGen.Add(child);
+            }
+
+            if (nextGen.Count == 0)
+            {
+                break;
             }
 
             nextGen.Sort(static (a, b) => b.Fitness.CompareTo(a.Fitness));
@@ -87,7 +103,11 @@ public sealed class HarmonizerEvolutionLoop
         return new EvolutionResult(bestSoFar, generationFitness);
     }
 
-    private List<Individual> InitialisePopulation(HarmonyBitmap seed, Random random, CancellationToken ct)
+    private List<Individual> InitialisePopulation(
+        HarmonyBitmap seed,
+        Random random,
+        CancellationToken ct,
+        System.Diagnostics.Stopwatch stopwatch)
     {
         var population = new List<Individual>(_config.PopulationSize)
         {
@@ -97,6 +117,11 @@ public sealed class HarmonizerEvolutionLoop
         while (population.Count < _config.PopulationSize)
         {
             ct.ThrowIfCancellationRequested();
+            if (BudgetExceeded(stopwatch))
+            {
+                break;
+            }
+
             var clone = BitmapCloner.Clone(seed);
             _stochasticMutation.Apply(clone, _config.StochasticMutationsPerOffspring, random);
             population.Add(EvaluateConductorPass(clone, random, ct));
@@ -105,6 +130,9 @@ public sealed class HarmonizerEvolutionLoop
         population.Sort(static (a, b) => b.Fitness.CompareTo(a.Fitness));
         return population;
     }
+
+    private bool BudgetExceeded(System.Diagnostics.Stopwatch stopwatch) =>
+        _config.MaxRuntime is { } maxRuntime && stopwatch.Elapsed >= maxRuntime;
 
     private Individual SelectByTournament(IReadOnlyList<Individual> population, Random random)
     {

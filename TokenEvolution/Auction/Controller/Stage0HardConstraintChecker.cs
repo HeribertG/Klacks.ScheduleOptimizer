@@ -135,7 +135,18 @@ public sealed class Stage0HardConstraintChecker
                 $"Agent {agent.Id} would create a {runLength}-day work block on {date.Value:yyyy-MM-dd}; hard cap is {hardCap}.");
         }
 
-        if (!RespectsWeekday(agent, date.Value.DayOfWeek))
+        // Per-date contract availability wins over the static weekday flags: a contract starting
+        // or ending mid-period makes individual days non-workable regardless of the weekday.
+        var worksOnDate = context.WorksOnDate(agent.Id, date.Value);
+        if (worksOnDate.HasValue)
+        {
+            if (!worksOnDate.Value)
+            {
+                return new VetoVerdict(0, "ContractDay",
+                    $"Agent {agent.Id} has no active contract or no working day on {date.Value:yyyy-MM-dd}.");
+            }
+        }
+        else if (!RespectsWeekday(agent, date.Value.DayOfWeek))
         {
             return new VetoVerdict(0, "ContractWeekday",
                 $"Agent {agent.Id} is not contracted to work on {date.Value.DayOfWeek}.");

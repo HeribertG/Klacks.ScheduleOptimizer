@@ -13,10 +13,16 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Metrics;
 /// <param name="ShiftTypeEntropyAvg">Avg Shannon entropy (base 2) of shift-type distribution per agent. 0 = single type, log2(3) ~ 1.585 = perfect mix</param>
 /// <param name="Stage1EscalationCount">Number of Stage-1 soft constraint relaxations logged during the run</param>
 /// <param name="MaxConsecutiveBlockLen">Longest consecutive-day block of any agent across the plan</param>
+/// <param name="RosterFidelityInversionRate">
+/// Fraction of roster pairs (higher-priority agent vs lower-priority agent) where the higher one
+/// ends up with a worse relative target-hours deviation. 0 = perfect top-down fidelity (the top of
+/// the roster is always at least as accurate as everyone below), 1 = fully inverted.
+/// </param>
 public sealed record WizardMetricsSnapshot(
     double CoveragePercent,
     double TargetReachedPercent,
     double SlotGini,
     double ShiftTypeEntropyAvg,
     int Stage1EscalationCount,
-    int MaxConsecutiveBlockLen);
+    int MaxConsecutiveBlockLen,
+    double RosterFidelityInversionRate);

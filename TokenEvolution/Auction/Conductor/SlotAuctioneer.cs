@@ -12,7 +12,10 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Conductor;
 /// the highest-scoring Stage-0+Stage-1-clean bid above AcceptanceThreshold wins Round 1.
 /// If no bid is Stage-1-clean, the highest-scoring Stage-0-clean bid wins Round 2 (escalation
 /// logged). If no agent is Stage-0-clean, the slot stays unassigned (Round 3) — no force-assign.
-/// Ties on score are broken by AgentId (ordinal) for determinism.
+/// Top-down roster rule: while candidates are still below their guaranteed hours, the slot goes
+/// to the best-scoring of them (ties broken by roster position, top wins). Once every candidate
+/// has reached its target the slot is surplus and goes to the bottom of the roster instead, so
+/// the top of the roster stays accurate ("the bottom eats what is left").
 /// </summary>
 public sealed class SlotAuctioneer
 {
@@ -45,8 +48,10 @@ public sealed class SlotAuctioneer
             .ToList();
 
         var states = new Dictionary<string, AgentRuntimeState>(StringComparer.Ordinal);
+        var rosterPosition = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var agent in context.Agents)
         {
+            rosterPosition[agent.Id] = rosterPosition.Count;
             states[agent.Id] = AgentRuntimeState.InitialFromBoundary(
                 agent.Id,
                 context.PeriodFrom,
@@ -59,7 +64,7 @@ public sealed class SlotAuctioneer
 
         foreach (var slot in orderedSlots)
         {
-            var result = AwardSlot(slot, tokens, states, context, escalation);
+            var result = AwardSlot(slot, tokens, states, context, escalation, rosterPosition);
             auctionResults.Add(result);
             if (result.WinnerAgentId is null)
             {
@@ -89,7 +94,8 @@ public sealed class SlotAuctioneer
         IReadOnlyList<CoreToken> tokensSoFar,
         IReadOnlyDictionary<string, AgentRuntimeState> states,
         CoreWizardContext context,
-        EscalationLog escalation)
+        EscalationLog escalation,
+        IReadOnlyDictionary<string, int> rosterPosition)
     {
         var bids = new List<Bid>(context.Agents.Count);
         var vetos = new List<VetoVerdict>(context.Agents.Count);
@@ -129,19 +135,13 @@ public sealed class SlotAuctioneer
 
         if (round1Candidates.Count > 0)
         {
-            var winner = round1Candidates
-                .OrderByDescending(b => b.Score)
-                .ThenBy(b => b.AgentId, StringComparer.Ordinal)
-                .First();
+            var winner = SelectWinner(round1Candidates, b => b.AgentId, b => b.Score, states, context, rosterPosition);
             return new AuctionResult(slotId, winner.AgentId, 1, bids, vetos);
         }
 
         if (round2Candidates.Count > 0)
         {
-            var winner = round2Candidates
-                .OrderByDescending(c => c.Bid.Score)
-                .ThenBy(c => c.Bid.AgentId, StringComparer.Ordinal)
-                .First();
+            var winner = SelectWinner(round2Candidates, c => c.Bid.AgentId, c => c.Bid.Score, states, context, rosterPosition);
             if (DateOnly.TryParse(slot.Date, out var date))
             {
                 escalation.Record(winner.Bid.AgentId, date, winner.V1);
@@ -150,6 +150,49 @@ public sealed class SlotAuctioneer
         }
 
         return new AuctionResult(slotId, null, 3, bids, vetos);
+    }
+
+    /// <summary>
+    /// Picks the winning candidate for a slot according to the top-down roster rule: candidates
+    /// still below their guaranteed hours win by score (roster position breaks ties, top first);
+    /// when every candidate is already at or above target the slot is surplus and goes to the
+    /// bottom-most roster position so the top of the roster keeps its accurate target hours.
+    /// </summary>
+    private static T SelectWinner<T>(
+        IReadOnlyList<T> candidates,
+        Func<T, string> agentIdOf,
+        Func<T, double> scoreOf,
+        IReadOnlyDictionary<string, AgentRuntimeState> states,
+        CoreWizardContext context,
+        IReadOnlyDictionary<string, int> rosterPosition)
+    {
+        var agentLookup = context.Agents.ToDictionary(a => a.Id, StringComparer.Ordinal);
+
+        bool IsBelowTarget(string agentId)
+        {
+            if (!agentLookup.TryGetValue(agentId, out var agent) || agent.GuaranteedHours <= 0)
+            {
+                return false;
+            }
+            var assigned = states.TryGetValue(agentId, out var state) ? state.HoursAssignedThisRun : 0;
+            return agent.CurrentHours + assigned < agent.GuaranteedHours;
+        }
+
+        var belowTarget = candidates.Where(c => IsBelowTarget(agentIdOf(c))).ToList();
+        if (belowTarget.Count > 0)
+        {
+            return belowTarget
+                .OrderByDescending(scoreOf)
+                .ThenBy(c => rosterPosition.GetValueOrDefault(agentIdOf(c), int.MaxValue))
+                .ThenBy(c => agentIdOf(c), StringComparer.Ordinal)
+                .First();
+        }
+
+        return candidates
+            .OrderByDescending(c => rosterPosition.GetValueOrDefault(agentIdOf(c), int.MinValue))
+            .ThenByDescending(scoreOf)
+            .ThenBy(c => agentIdOf(c), StringComparer.Ordinal)
+            .First();
     }
 
     private static CoreToken BuildToken(CoreShift slot, string agentId, CoreAgent? agent)
@@ -201,9 +244,12 @@ public sealed class SlotAuctioneer
 
     private static AgentRuntimeState ApplyAssignmentToState(AgentRuntimeState prev, CoreToken token)
     {
-        var newBlockLength = prev.LastWorkedDate.HasValue && prev.LastWorkedDate.Value.AddDays(1) == token.Date
-            ? prev.CurrentBlockLength + 1
-            : 1;
+        var sameDay = prev.LastWorkedDate.HasValue && prev.LastWorkedDate.Value == token.Date;
+        var continuesBlock = sameDay
+            || (prev.LastWorkedDate.HasValue && prev.LastWorkedDate.Value.AddDays(1) == token.Date);
+        var newBlockLength = sameDay
+            ? Math.Max(prev.CurrentBlockLength, 1)
+            : continuesBlock ? prev.CurrentBlockLength + 1 : 1;
 
         var daysSince = prev.DaysSinceShiftType.ToArray();
         for (var i = 0; i < daysSince.Length; i++)
@@ -217,6 +263,9 @@ public sealed class SlotAuctioneer
             CurrentBlockLength = newBlockLength,
             LastWorkedDate = token.Date,
             DaysSinceShiftType = daysSince,
+            CurrentBlockStartShiftType = continuesBlock && prev.CurrentBlockStartShiftType >= 0
+                ? prev.CurrentBlockStartShiftType
+                : token.ShiftTypeIndex,
         };
     }
 }

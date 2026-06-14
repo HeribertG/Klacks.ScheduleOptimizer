@@ -11,10 +11,12 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// For token-bound violations (MaxDailyHours, keyword, etc.) the operator removes an offending
 /// non-locked token. For slot-bound <see cref="ViolationKind.UnderSupply"/> violations it tries
 /// to ADD a valid token filling the missing slot. Locked tokens are never mutated.
-/// Index-aware: UnderSupply picks the new agent with top-bias (Top roster position wins more
-/// often), OverSupply and RemoveOffendingToken pick the doomed token with bottom-bias (Bottom
-/// roster position loses its slot more often). Together with <see cref="ReassignMutation"/>
-/// this gives ~35% of GA mutation calls a top-down distribution pull.
+/// Index-aware (top-down roster rule): UnderSupply prefers agents still BELOW their guaranteed
+/// hours, top roster position first — but once every candidate has reached its target, the
+/// surplus slot goes bottom-first so the top of the roster stays accurate ("the bottom eats
+/// what is left"). OverSupply and RemoveOffendingToken pick the doomed token with bottom-bias.
+/// Together with <see cref="ReassignMutation"/> this gives ~35% of GA mutation calls a
+/// top-down distribution pull.
 /// </summary>
 public sealed class TokenRepair : ITokenOperator
 {
@@ -172,7 +174,7 @@ public sealed class TokenRepair : ITokenOperator
             return TokenSwapMutation.CloneScenario(context.Primary, tokens);
         }
 
-        var chosen = RosterPositionBias.PickWithTopBias(candidates, a => a.Id, context.Wizard.Agents, context.Rng);
+        var chosen = RosterPositionBias.PickAccuracyAware(candidates, tokens, context.Wizard.Agents, context.Rng);
         tokens.Add(new CoreToken(
             WorkIds: [],
             ShiftTypeIndex: shiftTypeIndex,

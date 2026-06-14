@@ -9,6 +9,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Evolution;
 /// <param name="StochasticMutationsPerOffspring">Random swap count applied before deterministic optimisation</param>
 /// <param name="StagnationGenerations">Generations without improvement before early stop</param>
 /// <param name="Seed">Deterministic seed for the random source; null for non-deterministic runs</param>
+/// <param name="MaxRuntime">Optional soft wall-clock budget; when exceeded the loop stops gracefully and returns the best individual found so far. Null = no time limit</param>
 public sealed record HarmonizerEvolutionConfig(
     int PopulationSize = 8,
     int MaxGenerations = 20,
@@ -16,4 +17,5 @@ public sealed record HarmonizerEvolutionConfig(
     int TournamentSize = 3,
     int StochasticMutationsPerOffspring = 2,
     int StagnationGenerations = 5,
-    int? Seed = null);
+    int? Seed = null,
+    TimeSpan? MaxRuntime = null);

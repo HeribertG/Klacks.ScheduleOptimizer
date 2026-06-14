@@ -34,6 +34,41 @@ public static class RosterPositionBias
         return Pick(candidates, agentIdOf, roster, rng, inverse: true);
     }
 
+    /// <summary>
+    /// Accuracy-aware roster pick implementing the top-down rule for hour-adding moves:
+    /// candidates still below their guaranteed hours receive first (top roster position
+    /// preferred); once every candidate is at or above target the surplus goes to the
+    /// bottom of the roster, keeping the top accurate ("the bottom eats what is left").
+    /// </summary>
+    /// <param name="candidates">Valid receiving agents — must contain at least one element.</param>
+    /// <param name="assignedTokens">Tokens currently assigned in the scenario (hours source).</param>
+    /// <param name="roster">Authoritative ordered agent list; index 0 is top.</param>
+    /// <param name="rng">RNG instance owned by the caller for reproducibility.</param>
+    public static CoreAgent PickAccuracyAware(
+        IReadOnlyList<CoreAgent> candidates,
+        IReadOnlyList<CoreToken> assignedTokens,
+        IReadOnlyList<CoreAgent> roster,
+        Random rng)
+    {
+        var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var token in assignedTokens)
+        {
+            var hours = (double)(token.TotalHours + token.Surcharges);
+            hoursByAgent[token.AgentId] = hoursByAgent.TryGetValue(token.AgentId, out var existing)
+                ? existing + hours
+                : hours;
+        }
+
+        var belowTarget = candidates
+            .Where(a => a.GuaranteedHours > 0
+                && a.CurrentHours + hoursByAgent.GetValueOrDefault(a.Id, 0) < a.GuaranteedHours)
+            .ToList();
+
+        return belowTarget.Count > 0
+            ? PickWithTopBias(belowTarget, a => a.Id, roster, rng)
+            : PickWithBottomBias(candidates, a => a.Id, roster, rng);
+    }
+
     private static T Pick<T>(
         IReadOnlyList<T> candidates,
         Func<T, string> agentIdOf,

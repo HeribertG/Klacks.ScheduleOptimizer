@@ -15,6 +15,10 @@ public static class WizardMetricsCalculator
 {
     private const int ShiftTypeCount = 3;
 
+    // Two agents whose relative deviations differ by less than this are treated as equally
+    // accurate — small assignment granularity differences must not count as inversions.
+    private const double RosterFidelityEpsilon = 0.01;
+
     public static WizardMetricsSnapshot Compute(
         CoreScenario scenario,
         CoreWizardContext context,
@@ -34,6 +38,7 @@ public static class WizardMetricsCalculator
         var gini = ComputeSlotGini(context.Agents, tokensByAgent);
         var entropyAvg = ComputeShiftTypeEntropyAvg(context.Agents, tokensByAgent);
         var maxBlock = ComputeMaxConsecutiveBlockLength(tokensByAgent);
+        var rosterFidelity = ComputeRosterFidelityInversionRate(context.Agents, tokensByAgent);
 
         return new WizardMetricsSnapshot(
             CoveragePercent: coverage,
@@ -41,7 +46,53 @@ public static class WizardMetricsCalculator
             SlotGini: gini,
             ShiftTypeEntropyAvg: entropyAvg,
             Stage1EscalationCount: stage1EscalationCount,
-            MaxConsecutiveBlockLen: maxBlock);
+            MaxConsecutiveBlockLen: maxBlock,
+            RosterFidelityInversionRate: rosterFidelity);
+    }
+
+    /// <summary>
+    /// Measures the top-down roster rule ("the higher in the roster, the more accurate the result"):
+    /// for every agent pair the higher-priority agent must not deviate further from its guaranteed
+    /// hours (relative, symmetric) than the lower-priority one. Returns the fraction of violating
+    /// pairs. context.Agents order is the canonical roster priority order.
+    /// </summary>
+    private static double ComputeRosterFidelityInversionRate(
+        IReadOnlyList<CoreAgent> agents,
+        Dictionary<string, List<CoreToken>> tokensByAgent)
+    {
+        var deviations = new List<double>(agents.Count);
+        foreach (var agent in agents)
+        {
+            if (agent.GuaranteedHours <= 0)
+            {
+                continue;
+            }
+            var combined = tokensByAgent.TryGetValue(agent.Id, out var ts)
+                ? ts.Sum(t => (double)(t.TotalHours + t.Surcharges))
+                : 0.0;
+            deviations.Add(Math.Abs(combined - agent.GuaranteedHours) / agent.GuaranteedHours);
+        }
+
+        if (deviations.Count < 2)
+        {
+            return 0.0;
+        }
+
+        var inversions = 0;
+        var pairs = 0;
+        for (var upper = 0; upper < deviations.Count - 1; upper++)
+        {
+            for (var lower = upper + 1; lower < deviations.Count; lower++)
+            {
+                pairs++;
+                if (deviations[upper] > deviations[lower] + RosterFidelityEpsilon)
+                {
+                    inversions++;
+                }
+            }
+        }
+
+        return (double)inversions / pairs;
     }
 
     private static double ComputeTargetReached(

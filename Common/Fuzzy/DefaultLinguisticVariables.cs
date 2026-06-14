@@ -48,6 +48,12 @@ public static class DefaultLinguisticVariables
             ["Bottom"] = new TrapezoidMf(0.65, 0.85, 1, 1),
         });
 
+        dict["NewBlockSameType"] = new("NewBlockSameType", new Dictionary<string, MembershipFunction>
+        {
+            ["No"] = new TrapezoidMf(0, 0, 0.2, 0.5),
+            ["Yes"] = new TrapezoidMf(0.5, 0.8, 1, 1),
+        });
+
         return dict;
     }
 

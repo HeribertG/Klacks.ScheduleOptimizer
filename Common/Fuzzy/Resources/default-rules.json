@@ -21,6 +21,7 @@
   { "name": "R20_SlotRotationHot", "if": [{"var":"SlotDaysSince","is":"Hot"}], "op":"AND", "then":{"var":"BidScore","is":"High"} },
   { "name": "R21_SlotRotationWarm", "if": [{"var":"SlotDaysSince","is":"Warm"}], "op":"AND", "then":{"var":"BidScore","is":"Medium"} },
   { "name": "R22_SlotRotationCool", "if": [{"var":"SlotDaysSince","is":"Cool"}], "op":"AND", "then":{"var":"BidScore","is":"Reject"} },
+  { "name": "R23_BlockRestartSameType", "if": [{"var":"NewBlockSameType","is":"Yes"}], "op":"AND", "then":{"var":"BidScore","is":"Reject"} },
   { "name": "R26_StarvingClosing", "if": [{"var":"BlockHunger","is":"Starving"},{"var":"BlockMaturity","is":"Closing"}], "op":"AND", "then":{"var":"BidScore","is":"High"} },
   { "name": "R27_StarvingEmpty", "if": [{"var":"BlockHunger","is":"Starving"},{"var":"BlockMaturity","is":"Empty"}], "op":"AND", "then":{"var":"BidScore","is":"MustHave"} },
   { "name": "R28_TopIndexStarving", "if": [{"var":"IndexBonus","is":"Top"},{"var":"BlockHunger","is":"Starving"}], "op":"AND", "then":{"var":"BidScore","is":"MustHave"} },

@@ -18,6 +18,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     private readonly IReadOnlyDictionary<string, double> _maxPossiblePerAgent;
     private readonly IReadOnlyList<string> _agentsInPriorityOrder;
 
+    /// <summary>Stage-1 roster-rank decay: weights WHO reaches the guaranteed hours top-down. 1.0 = index-blind count (legacy), lower = top-roster satisfaction dominates. Autoresearch-trainable.</summary>
+    public double Stage1RankDecay { get; init; } = 0.85;
+
     /// <summary>Stage-2 exponential decay factor, autoresearch-trainable.</summary>
     public double Stage2Decay { get; init; } = 0.7;
 
@@ -48,12 +51,14 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var cfg = config ?? new TokenEvolutionConfig();
         var checker = new TokenConstraintChecker();
         var maxPossible = new MaxPossibleCalculator().ComputeForAll(context);
-        var priorityOrder = context.Agents
-            .OrderByDescending(a => a.FullTime)
-            .ThenByDescending(a => a.FullTime - a.CurrentHours)
-            .ToList();
-        return new TokenFitnessEvaluator(checker, maxPossible, priorityOrder)
+
+        // context.Agents IS the canonical top-down roster priority order (user order or
+        // guaranteed-hours reshaping, established by the context builder). Auction IndexBonus,
+        // ReassignMutation and TokenRepair already rank by this list — the Stage2 decay weights
+        // must follow the same order, not a private re-sort.
+        return new TokenFitnessEvaluator(checker, maxPossible, context.Agents)
         {
+            Stage1RankDecay = cfg.FitnessStage1RankDecay,
             Stage2Decay = cfg.FitnessStage2Decay,
             Stage3BlockOrderWeight = cfg.FitnessStage3BlockOrder,
             Stage3BlacklistWeight = cfg.FitnessStage3Blacklist,
@@ -158,8 +163,24 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             flags.Add(covered >= agent.GuaranteedHours ? 1 : 0);
         }
 
-        var completion = flags.Count == 0 ? 1.0 : flags.Sum() / (double)flags.Count;
-        return (flags, completion);
+        // Roster-rank weighting (top-down rule): when supply cannot satisfy everyone, plans that
+        // satisfy higher-roster agents must outrank plans that satisfy the same number of lower
+        // ones. Stage1RankDecay = 1.0 restores the legacy index-blind count.
+        if (flags.Count == 0)
+        {
+            return (flags, 1.0);
+        }
+
+        double weightedSum = 0;
+        double weightTotal = 0;
+        for (var i = 0; i < flags.Count; i++)
+        {
+            var weight = Math.Pow(Stage1RankDecay, i);
+            weightedSum += weight * flags[i];
+            weightTotal += weight;
+        }
+
+        return (flags, weightedSum / weightTotal);
     }
 
     /// <summary>
@@ -237,7 +258,14 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 var covered = agent.CurrentHours
                     + tokensByAgent.GetValueOrDefault(agentId, 0)
                     + breakHoursByAgent.GetValueOrDefault(agentId, 0);
-                coverage = Math.Min(covered, target) / target;
+
+                // Symmetric accuracy: overshoot is penalised like shortfall. Since every slot
+                // must be filled (UnderSupply is a hard violation), surplus hours have to land
+                // somewhere — the rank decay steers them to the bottom of the roster where the
+                // weight is lowest, keeping the top of the roster accurate (top-down rule).
+                coverage = covered <= target
+                    ? covered / target
+                    : Math.Max(0, 1 - ((covered - target) / target));
             }
 
             weightedScore += weight * coverage;
@@ -248,7 +276,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
 
     private double ComputeStage3(CoreScenario scenario, CoreWizardContext context)
     {
-        var blockOrder = ComputeBlockOrderingScore(scenario);
+        var blockOrder = ComputeBlockOrderingScore(scenario, context);
         var blacklist = ComputeBlacklistScore(scenario, context);
         var location = ComputeLocationContinuityScore(scenario);
         var gap = ComputeMaxOptimalGapScore(scenario, context);
@@ -265,24 +293,80 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 + gap * Stage3MaxGapWeight) / totalWeight;
     }
 
-    private static double ComputeBlockOrderingScore(CoreScenario scenario)
+    private const int ShiftTypeCycleLength = 3;
+    private const double NonCycleRotationPenalty = 0.5;
+
+    /// <summary>
+    /// Scores the shift-type rotation rule (early → late → night). Blocks are maximal runs of
+    /// consecutive working dates per agent — token BlockIds are NOT used because every token
+    /// created by the auction, coverage strategy and repair carries its own fresh BlockId, which
+    /// made the old per-BlockId grouping evaluate nothing. Inside a block, backwards transitions
+    /// (late → early etc.) are violations. Across blocks the schedule must rotate: starting the
+    /// next block with the same type as the previous block is a full violation, the cycle-next
+    /// type is ideal, any other change costs half. Agents without PerformsShiftWork are exempt —
+    /// they may only work day shifts and must not be punished for repeating them.
+    /// </summary>
+    private static double ComputeBlockOrderingScore(CoreScenario scenario, CoreWizardContext context)
     {
-        var pairs = 0;
-        var descending = 0;
-        foreach (var block in scenario.Tokens.GroupBy(t => t.BlockId))
+        var shiftWorkers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var agent in context.Agents)
         {
-            var ordered = block.OrderBy(t => t.StartAt).ToList();
-            for (var i = 1; i < ordered.Count; i++)
+            if (agent.PerformsShiftWork)
             {
-                pairs++;
-                if (ordered[i].ShiftTypeIndex < ordered[i - 1].ShiftTypeIndex)
+                shiftWorkers.Add(agent.Id);
+            }
+        }
+
+        double units = 0;
+        double violations = 0;
+
+        foreach (var perAgent in scenario.Tokens.GroupBy(t => t.AgentId, StringComparer.Ordinal))
+        {
+            if (!shiftWorkers.Contains(perAgent.Key))
+            {
+                continue;
+            }
+
+            var ordered = perAgent.OrderBy(t => t.Date).ThenBy(t => t.StartAt).ToList();
+            var blocks = new List<List<CoreToken>>();
+            foreach (var token in ordered)
+            {
+                if (blocks.Count == 0 || token.Date.DayNumber - blocks[^1][^1].Date.DayNumber > 1)
                 {
-                    descending++;
+                    blocks.Add([]);
+                }
+                blocks[^1].Add(token);
+            }
+
+            foreach (var block in blocks)
+            {
+                for (var i = 1; i < block.Count; i++)
+                {
+                    units++;
+                    if (block[i].ShiftTypeIndex < block[i - 1].ShiftTypeIndex)
+                    {
+                        violations++;
+                    }
+                }
+            }
+
+            for (var b = 1; b < blocks.Count; b++)
+            {
+                units++;
+                var previousType = blocks[b - 1][0].ShiftTypeIndex;
+                var nextType = blocks[b][0].ShiftTypeIndex;
+                if (nextType == previousType)
+                {
+                    violations += 1.0;
+                }
+                else if (nextType != (previousType + 1) % ShiftTypeCycleLength)
+                {
+                    violations += NonCycleRotationPenalty;
                 }
             }
         }
 
-        return pairs == 0 ? 1 : 1.0 - (descending / (double)pairs);
+        return units == 0 ? 1 : 1.0 - (violations / units);
     }
 
     private static double ComputeBlacklistScore(CoreScenario scenario, CoreWizardContext context)

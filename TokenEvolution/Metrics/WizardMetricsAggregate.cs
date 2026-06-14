@@ -17,6 +17,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Metrics;
 /// <param name="ShiftTypeEntropyStdDev">Sample standard deviation of entropy.</param>
 /// <param name="MaxConsecutiveBlockLenMean">Mean longest consecutive-day block.</param>
 /// <param name="MaxConsecutiveBlockLenMax">Worst-case (highest) consecutive block observed across runs.</param>
+/// <param name="RosterFidelityInversionMean">Mean roster-fidelity inversion rate (0 = top-down rule fully honoured).</param>
+/// <param name="RosterFidelityInversionStdDev">Sample standard deviation of the roster-fidelity inversion rate.</param>
 public sealed record WizardMetricsAggregate(
     int RunCount,
     double CoverageMean,
@@ -28,7 +30,9 @@ public sealed record WizardMetricsAggregate(
     double ShiftTypeEntropyMean,
     double ShiftTypeEntropyStdDev,
     double MaxConsecutiveBlockLenMean,
-    int MaxConsecutiveBlockLenMax)
+    int MaxConsecutiveBlockLenMax,
+    double RosterFidelityInversionMean = 0,
+    double RosterFidelityInversionStdDev = 0)
 {
     public static WizardMetricsAggregate FromSnapshots(IReadOnlyList<WizardMetricsSnapshot> snapshots)
     {
@@ -47,7 +51,9 @@ public sealed record WizardMetricsAggregate(
             ShiftTypeEntropyMean: Mean(snapshots, s => s.ShiftTypeEntropyAvg),
             ShiftTypeEntropyStdDev: StdDev(snapshots, s => s.ShiftTypeEntropyAvg),
             MaxConsecutiveBlockLenMean: Mean(snapshots, s => (double)s.MaxConsecutiveBlockLen),
-            MaxConsecutiveBlockLenMax: snapshots.Max(s => s.MaxConsecutiveBlockLen));
+            MaxConsecutiveBlockLenMax: snapshots.Max(s => s.MaxConsecutiveBlockLen),
+            RosterFidelityInversionMean: Mean(snapshots, s => s.RosterFidelityInversionRate),
+            RosterFidelityInversionStdDev: StdDev(snapshots, s => s.RosterFidelityInversionRate));
     }
 
     private static double Mean(IReadOnlyList<WizardMetricsSnapshot> snaps, Func<WizardMetricsSnapshot, double> selector)

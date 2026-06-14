@@ -43,10 +43,17 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
     private static Dictionary<string, double> ExtractFeatures(
         CoreAgent agent, CoreShift slot, AgentRuntimeState state, CoreWizardContext context)
     {
-        var consumedThisBlock = state.CurrentBlockLength * 8.0;
+        // The runtime state still carries the PREVIOUS block when the slot lies after rest days.
+        // Bidding must then see a fresh block (hungry + empty) — otherwise every candidate is
+        // "Sated → Reject" at block restarts, all bids collapse to the floor and the roster
+        // tie-break alone decides, which kills the shift-type rotation.
+        var startsNewBlock = StartsNewBlock(slot, state);
+        var effectiveBlockLength = startsNewBlock ? 0 : state.CurrentBlockLength;
+
+        var consumedThisBlock = effectiveBlockLength * 8.0;
         var blockHunger = Math.Max(0, BlockSaturationHours - consumedThisBlock);
 
-        var blockMaturity = state.CurrentBlockLength;
+        var blockMaturity = effectiveBlockLength;
 
         var weeklyCap = agent.MaxWeeklyHours > 0 ? agent.MaxWeeklyHours : 50.0;
         var weeklyLoad = (agent.CurrentHours + state.HoursAssignedThisRun) / weeklyCap;
@@ -65,7 +72,36 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
             ["SlotDaysSince"] = ToDouble(state.DaysSinceShiftType, slotTypeIndex),
             ["WeeklyLoad"] = weeklyLoad,
             ["IndexBonus"] = indexBonus,
+            ["NewBlockSameType"] = ResolveNewBlockSameType(agent, state, slotTypeIndex, startsNewBlock),
         };
+    }
+
+    private static bool StartsNewBlock(CoreShift slot, AgentRuntimeState state)
+    {
+        if (!state.LastWorkedDate.HasValue)
+        {
+            return true;
+        }
+
+        return DateOnly.TryParse(slot.Date, out var slotDate)
+            && slotDate.DayNumber - state.LastWorkedDate.Value.DayNumber > 1;
+    }
+
+    /// <summary>
+    /// 1.0 when the agent would START A NEW BLOCK with the same shift type its previous block
+    /// used — the rotation rule (early → late → night) demands a type change between blocks.
+    /// Always 0 for agents without PerformsShiftWork: they may only work day shifts and must
+    /// not be penalised for repeating them.
+    /// </summary>
+    private static double ResolveNewBlockSameType(
+        CoreAgent agent, AgentRuntimeState state, int slotTypeIndex, bool startsNewBlock)
+    {
+        if (!agent.PerformsShiftWork || state.CurrentBlockStartShiftType < 0)
+        {
+            return 0.0;
+        }
+
+        return startsNewBlock && state.CurrentBlockStartShiftType == slotTypeIndex ? 1.0 : 0.0;
     }
 
     private static double ResolveIndexBonus(CoreAgent agent, CoreWizardContext context)

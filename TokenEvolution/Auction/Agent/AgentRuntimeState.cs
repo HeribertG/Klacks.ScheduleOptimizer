@@ -14,12 +14,14 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Agent;
 /// <param name="CurrentBlockLength">Length of the in-progress consecutive work block (0 if last day was rest)</param>
 /// <param name="LastWorkedDate">Most recent assigned date or null</param>
 /// <param name="DaysSinceShiftType">Index 0=early, 1=late, 2=night → days since last shift of that type (int.MaxValue if never)</param>
+/// <param name="CurrentBlockStartShiftType">Shift type the in-progress block started with (-1 = no block yet); used by the rotation rule when the next block begins</param>
 public sealed record AgentRuntimeState(
     string AgentId,
     double HoursAssignedThisRun,
     int CurrentBlockLength,
     DateOnly? LastWorkedDate,
-    IReadOnlyList<int> DaysSinceShiftType)
+    IReadOnlyList<int> DaysSinceShiftType,
+    int CurrentBlockStartShiftType = -1)
 {
     public static AgentRuntimeState Initial(string agentId) =>
         new(agentId, 0.0, 0, null, [int.MaxValue, int.MaxValue, int.MaxValue]);
@@ -36,6 +38,7 @@ public sealed record AgentRuntimeState(
         IReadOnlyList<CoreExistingWorkBlocker> boundaryExisting)
     {
         DateOnly? lastWorkedDate = null;
+        var lastWorkedType = -1;
         var daysSince = new int[] { int.MaxValue, int.MaxValue, int.MaxValue };
 
         foreach (var locked in boundaryLocked)
@@ -47,6 +50,7 @@ public sealed record AgentRuntimeState(
             if (!lastWorkedDate.HasValue || locked.Date > lastWorkedDate.Value)
             {
                 lastWorkedDate = locked.Date;
+                lastWorkedType = locked.ShiftTypeIndex;
             }
             UpdateDaysSince(daysSince, locked.ShiftTypeIndex, periodFrom, locked.Date);
         }
@@ -57,11 +61,12 @@ public sealed record AgentRuntimeState(
             {
                 continue;
             }
+            var idx = ShiftTypeInference.FromStartTime(TimeOnly.FromDateTime(blocker.StartAt));
             if (!lastWorkedDate.HasValue || blocker.Date > lastWorkedDate.Value)
             {
                 lastWorkedDate = blocker.Date;
+                lastWorkedType = idx;
             }
-            var idx = ShiftTypeInference.FromStartTime(TimeOnly.FromDateTime(blocker.StartAt));
             UpdateDaysSince(daysSince, idx, periodFrom, blocker.Date);
         }
 
@@ -76,7 +81,11 @@ public sealed record AgentRuntimeState(
             }
         }
 
-        return new AgentRuntimeState(agentId, 0.0, currentBlockLength, lastWorkedDate, daysSince);
+        // The most recent boundary work's type approximates the trailing block's start type —
+        // blocks are homogeneous in practice and only the rotation rule consumes this value.
+        var currentBlockStartType = currentBlockLength > 0 ? lastWorkedType : -1;
+
+        return new AgentRuntimeState(agentId, 0.0, currentBlockLength, lastWorkedDate, daysSince, currentBlockStartType);
     }
 
     private static void UpdateDaysSince(int[] daysSince, int shiftTypeIndex, DateOnly periodFrom, DateOnly workDate)
