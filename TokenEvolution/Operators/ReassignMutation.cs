@@ -33,7 +33,7 @@ public sealed class ReassignMutation : ITokenOperator
         var tokensWithoutCurrent = tokens.Where((_, i) => i != chosen.Index).ToList();
         var validAgents = context.Wizard.Agents
             .Where(a => a.Id != currentToken.AgentId
-                && SlotConstraintFilter.IsValidAssignment(a, currentToken.Date, currentToken.ShiftTypeIndex, currentToken.TotalHours, context.Wizard, tokensWithoutCurrent, currentToken.StartAt, currentToken.EndAt))
+                && SlotConstraintFilter.IsValidAssignment(a, currentToken.Date, currentToken.ShiftTypeIndex, currentToken.ShiftRefId, currentToken.TotalHours, context.Wizard, tokensWithoutCurrent, currentToken.StartAt, currentToken.EndAt))
             .ToList();
 
         if (validAgents.Count == 0)

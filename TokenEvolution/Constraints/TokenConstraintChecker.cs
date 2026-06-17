@@ -23,9 +23,40 @@ public sealed class TokenConstraintChecker
         CheckMinPauseHours(scenario, context, violations);
         CheckMaxDailyHours(scenario, context, violations);
         CheckMaximumHoursExceeded(scenario, context, violations);
+        CheckQualificationMismatch(scenario, context, violations);
         CheckSlotSupply(scenario, context, violations);
 
         return violations;
+    }
+
+    private static void CheckQualificationMismatch(CoreScenario scenario, CoreWizardContext context, List<ConstraintViolation> violations)
+    {
+        if (context.IneligibleAssignments.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var token in scenario.Tokens)
+        {
+            // Locked works are deliberate, immutable assignments (e.g. an offline-certified override) —
+            // the GA can never change them, so flagging one would create an unfixable violation the
+            // repair operators would chase forever. Empty shift refs (breaks/free) carry no requirement.
+            if (token.IsLocked || token.ShiftRefId == Guid.Empty)
+            {
+                continue;
+            }
+
+            if (!context.IsEligible(token.AgentId, token.ShiftRefId, token.Date))
+            {
+                violations.Add(new ConstraintViolation(
+                    Kind: ViolationKind.QualificationMissing,
+                    AgentId: token.AgentId,
+                    Date: token.Date,
+                    TokenBlockId: token.BlockId,
+                    Description: $"Agent {token.AgentId} lacks a mandatory qualification for shift {token.ShiftRefId} on {token.Date:yyyy-MM-dd}.",
+                    ShiftRefId: token.ShiftRefId));
+            }
+        }
     }
 
     public int CountViolations(CoreScenario scenario, CoreWizardContext context)

@@ -133,8 +133,9 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
             var slotStartUtc = slotDate.Value.ToDateTime(start);
             var slotEndUtc = end <= start ? slotDate.Value.AddDays(1).ToDateTime(end) : slotDate.Value.ToDateTime(end);
 
-            var agent = PickLeastLoaded(context.Agents, hoursAssigned, slotDate.Value, shiftTypeIndex, slotHours, context, tokens, slotStartUtc, slotEndUtc, requireValid: true)
-                        ?? PickLeastLoaded(context.Agents, hoursAssigned, slotDate.Value, shiftTypeIndex, slotHours, context, tokens, slotStartUtc, slotEndUtc, requireValid: false);
+            var shiftRefId = Guid.TryParse(slot.Id, out var parsedShiftRef) ? parsedShiftRef : Guid.Empty;
+            var agent = PickLeastLoaded(context.Agents, hoursAssigned, slotDate.Value, shiftTypeIndex, shiftRefId, slotHours, context, tokens, slotStartUtc, slotEndUtc, requireValid: true)
+                        ?? PickLeastLoaded(context.Agents, hoursAssigned, slotDate.Value, shiftTypeIndex, shiftRefId, slotHours, context, tokens, slotStartUtc, slotEndUtc, requireValid: false);
 
             if (agent is null)
             {
@@ -164,6 +165,7 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
         IReadOnlyDictionary<string, double> hoursAssigned,
         DateOnly slotDate,
         int shiftTypeIndex,
+        Guid shiftRefId,
         decimal slotHours,
         CoreWizardContext context,
         IReadOnlyList<CoreToken> tokensSoFar,
@@ -176,8 +178,15 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
 
         foreach (var agent in agents)
         {
+            // Qualification is a hard gate even when coverage is forced (requireValid=false):
+            // an unqualified agent is never an option, the slot stays empty instead of mis-staffed.
+            if (shiftRefId != Guid.Empty && !context.IsEligible(agent.Id, shiftRefId, slotDate))
+            {
+                continue;
+            }
+
             if (requireValid &&
-                !SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, slotHours, context, tokensSoFar, slotStartUtc, slotEndUtc))
+                !SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, shiftRefId, slotHours, context, tokensSoFar, slotStartUtc, slotEndUtc))
             {
                 continue;
             }
@@ -231,12 +240,12 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
         var slotStartUtc = slotDate.Value.ToDateTime(start);
         var slotEndUtc = end <= start ? slotDate.Value.AddDays(1).ToDateTime(end) : slotDate.Value.ToDateTime(end);
 
-        if (!SlotConstraintFilter.IsValidAssignment(agent, slotDate.Value, shiftTypeIndex, slotHours, context, tokensSoFar, slotStartUtc, slotEndUtc))
+        var shiftRef = Guid.TryParse(slot.Id, out var parsed) ? parsed : Guid.Empty;
+        if (!SlotConstraintFilter.IsValidAssignment(agent, slotDate.Value, shiftTypeIndex, shiftRef, slotHours, context, tokensSoFar, slotStartUtc, slotEndUtc))
         {
             return (false, 0);
         }
 
-        var shiftRef = Guid.TryParse(slot.Id, out var parsed) ? parsed : Guid.Empty;
         var motivation = MotivationFormula.Compute(agent, shiftRef, slotHours, context.ShiftPreferences);
         return (true, motivation);
     }

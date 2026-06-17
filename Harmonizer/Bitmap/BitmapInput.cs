@@ -14,6 +14,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// bitmap edges. The bitmap itself stays sized to [StartDate, EndDate]; these entries are never rendered into cells
 /// and never mutated.
 /// </param>
+/// <param name="IneligibleAssignments">
+/// Optional (agent, shift, date) triples the agent must not receive because it lacks a mandatory shift
+/// qualification. Empty/null = no qualification gating. Consumed by the replace validator.
+/// </param>
 public sealed record BitmapInput(
     IReadOnlyList<BitmapAgent> Agents,
     DateOnly StartDate,
@@ -21,4 +25,5 @@ public sealed record BitmapInput(
     IReadOnlyList<BitmapAssignment> Assignments,
     IReadOnlyList<SofteningHint>? SofteningHints = null,
     IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? Availability = null,
-    IReadOnlyList<BitmapAssignment>? BoundaryAssignments = null);
+    IReadOnlyList<BitmapAssignment>? BoundaryAssignments = null,
+    IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? IneligibleAssignments = null);

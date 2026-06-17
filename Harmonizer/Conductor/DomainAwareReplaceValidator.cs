@@ -26,12 +26,15 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
 
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
     private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
+    private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _ineligibleAssignments;
 
     public DomainAwareReplaceValidator(
         IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? availability,
-        IReadOnlyList<BitmapAssignment>? boundaryAssignments = null)
+        IReadOnlyList<BitmapAssignment>? boundaryAssignments = null,
+        IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? ineligibleAssignments = null)
     {
         _availability = availability ?? new Dictionary<(string, DateOnly), DayAvailability>();
+        _ineligibleAssignments = ineligibleAssignments ?? new HashSet<(string, Guid, DateOnly)>();
         _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
         if (boundaryAssignments is not null)
         {
@@ -40,6 +43,27 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
                 _boundaryByKey[(assignment.AgentId, assignment.Date)] = assignment;
             }
         }
+    }
+
+    /// <summary>
+    /// Returns null if the agent may receive the incoming cell's shift on the date, otherwise a short
+    /// reason. A missing mandatory qualification is a hard blocker. Public so Wizard 3's
+    /// PlanMutationValidator can apply the same check on its cross-day branch (which does not delegate
+    /// to <see cref="DiagnoseReceivingSide"/>). With an empty ineligible set this is always null.
+    /// </summary>
+    public string? DiagnoseEligibility(string agentId, string displayName, Cell incomingCell, DateOnly date, string roleLabel)
+    {
+        if (_ineligibleAssignments.Count == 0 || incomingCell.ShiftRefId is not Guid shiftId || shiftId == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (_ineligibleAssignments.Contains((agentId, shiftId, date)))
+        {
+            return $"{roleLabel} {displayName} not qualified for shift {incomingCell.Symbol} on {date:yyyy-MM-dd}";
+        }
+
+        return null;
     }
 
     public bool IsValid(HarmonyBitmap bitmap, ReplaceMove move) => Diagnose(bitmap, move) is null;
@@ -136,6 +160,12 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             && receivingAgent.BlacklistedShiftIds.Contains(shiftId))
         {
             return $"{roleLabel} {receivingAgent.DisplayName} blacklisted for shift {incomingCell.Symbol}";
+        }
+
+        var eligibilityIssue = DiagnoseEligibility(receivingAgent.Id, receivingAgent.DisplayName, incomingCell, date, roleLabel);
+        if (eligibilityIssue is not null)
+        {
+            return eligibilityIssue;
         }
 
         var dayIndex = IndexOfDate(bitmap.Days, date);

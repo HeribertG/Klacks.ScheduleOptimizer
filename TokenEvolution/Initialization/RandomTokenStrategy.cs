@@ -31,9 +31,10 @@ public sealed class RandomTokenStrategy : ITokenPopulationStrategy
             var slotStartUtc = slotDate.Value.ToDateTime(start);
             var slotEndUtc = end <= start ? slotDate.Value.AddDays(1).ToDateTime(end) : slotDate.Value.ToDateTime(end);
 
+            var shiftRefId = Guid.TryParse(slot.Id, out var parsedRef) ? parsedRef : Guid.Empty;
             var candidates = context.Agents
                 .Where(agent => SlotConstraintFilter.IsValidAssignment(
-                    agent, slotDate.Value, shiftTypeIndex, slotHours, context, tokens, slotStartUtc, slotEndUtc))
+                    agent, slotDate.Value, shiftTypeIndex, shiftRefId, slotHours, context, tokens, slotStartUtc, slotEndUtc))
                 .ToList();
 
             if (candidates.Count == 0)
@@ -54,7 +55,7 @@ public sealed class RandomTokenStrategy : ITokenPopulationStrategy
                 PositionInBlock: 0,
                 IsLocked: false,
                 LocationContext: null,
-                ShiftRefId: Guid.TryParse(slot.Id, out var shiftRef) ? shiftRef : Guid.Empty,
+                ShiftRefId: shiftRefId,
                 AgentId: chosen.Id));
         }
 

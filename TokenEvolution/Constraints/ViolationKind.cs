@@ -18,4 +18,5 @@ public enum ViolationKind
     MaximumHoursExceeded,
     UnderSupply,
     OverSupply,
+    QualificationMissing,
 }

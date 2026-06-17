@@ -22,12 +22,20 @@ public static class SlotConstraintFilter
         CoreAgent agent,
         DateOnly date,
         int shiftTypeIndex,
+        Guid shiftRefId,
         decimal slotHours,
         CoreWizardContext context,
         IReadOnlyList<CoreToken> alreadyAssigned,
         DateTime? slotStartUtc = null,
         DateTime? slotEndUtc = null)
     {
+        // Qualification gating is a hard prerequisite and an O(1) lookup, so it runs first: an agent
+        // lacking a mandatory qualification of the shift may never receive it (empty set = no-op).
+        if (shiftRefId != Guid.Empty && !context.IsEligible(agent.Id, shiftRefId, date))
+        {
+            return false;
+        }
+
         // Per-date contract availability wins over the static weekday flags: a contract starting
         // or ending mid-period makes individual days non-workable regardless of the weekday.
         var worksOnDate = context.WorksOnDate(agent.Id, date);

@@ -176,6 +176,12 @@ public sealed class Stage0HardConstraintChecker
                 $"Agent {agent.Id} is blacklisted from shift {slot.Id} on {date.Value:yyyy-MM-dd}.");
         }
 
+        if (!IsQualifiedForShift(agent.Id, slot.Id, date.Value, context))
+        {
+            return new VetoVerdict(0, "MissingQualification",
+                $"Agent {agent.Id} lacks a mandatory qualification required for shift {slot.Id} on {date.Value:yyyy-MM-dd}.");
+        }
+
         if (agent.MaximumHours > 0 && ExceedsMaxHours(agent, slotHours, alreadyAssigned))
         {
             return new VetoVerdict(0, "MaximumHoursContractCap",
@@ -221,6 +227,16 @@ public sealed class Stage0HardConstraintChecker
         DayOfWeek.Sunday => agent.WorkOnSunday,
         _ => false,
     };
+
+    private static bool IsQualifiedForShift(string agentId, string slotShiftRefId, DateOnly date, CoreWizardContext context)
+    {
+        if (string.IsNullOrEmpty(slotShiftRefId) || !Guid.TryParse(slotShiftRefId, out var shiftRefId))
+        {
+            return true;
+        }
+
+        return context.IsEligible(agentId, shiftRefId, date);
+    }
 
     private static bool IsBlacklistedShift(string agentId, string slotShiftRefId, IReadOnlyList<CoreShiftPreference> preferences)
     {

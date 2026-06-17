@@ -166,7 +166,7 @@ public sealed class TokenRepair : ITokenOperator
         var candidates = context.Wizard.Agents
             .Where(agent => !occupiedAgents.Contains(agent.Id)
                 && SlotConstraintFilter.IsValidAssignment(
-                    agent, violation.Date.Value, shiftTypeIndex, slotHours, context.Wizard, tokens, slotStartUtc, slotEndUtc))
+                    agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours, context.Wizard, tokens, slotStartUtc, slotEndUtc))
             .ToList();
 
         if (candidates.Count == 0)

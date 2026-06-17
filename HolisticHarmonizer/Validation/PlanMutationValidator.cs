@@ -56,12 +56,32 @@ public sealed class PlanMutationValidator
         }
 
         var crossDay = swap.DayA != swap.DayB;
-        if (crossDay && IsWork(cellA.Symbol) != IsWork(cellB.Symbol))
+        if (crossDay)
         {
-            return new PlanMutationRejection(
-                swap,
-                PlanMutationRejectionReason.HardConstraintViolation,
-                "Cross-day swap would change daily work coverage: one cell is work, the other is free. Only swap two cells with the same work-or-free state across different days.");
+            if (IsWork(cellA.Symbol) != IsWork(cellB.Symbol))
+            {
+                return new PlanMutationRejection(
+                    swap,
+                    PlanMutationRejectionReason.HardConstraintViolation,
+                    "Cross-day swap would change daily work coverage: one cell is work, the other is free. Only swap two cells with the same work-or-free state across different days.");
+            }
+
+            // Cross-day swaps do not delegate to the same-day domain validator, so the qualification
+            // gate is applied here directly for both receiving sides (rowA gets cellB on dayA,
+            // rowB gets cellA on dayB).
+            var crossDayAgentA = bitmap.Rows[swap.RowA];
+            var crossDayAgentB = bitmap.Rows[swap.RowB];
+            var eligibilityA = _domainValidator.DiagnoseEligibility(crossDayAgentA.Id, crossDayAgentA.DisplayName, cellB, bitmap.Days[swap.DayA], "rowA");
+            if (eligibilityA is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, eligibilityA);
+            }
+
+            var eligibilityB = _domainValidator.DiagnoseEligibility(crossDayAgentB.Id, crossDayAgentB.DisplayName, cellA, bitmap.Days[swap.DayB], "rowB");
+            if (eligibilityB is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, eligibilityB);
+            }
         }
 
         if (!crossDay)

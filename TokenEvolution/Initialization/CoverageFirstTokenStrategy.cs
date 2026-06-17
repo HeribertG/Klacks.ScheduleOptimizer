@@ -110,7 +110,7 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
 
         foreach (var agent in context.Agents)
         {
-            if (!SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, slotHours, context, tokens, slotStartUtc, slotEndUtc))
+            if (!SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, shiftRefId, slotHours, context, tokens, slotStartUtc, slotEndUtc))
             {
                 continue;
             }
