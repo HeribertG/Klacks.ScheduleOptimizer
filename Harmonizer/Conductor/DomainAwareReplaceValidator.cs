@@ -432,7 +432,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         return symbol != CellSymbol.Free && symbol != CellSymbol.Break;
     }
 
-    private static string? DiagnoseMaxWeeklyHours(
+    private string? DiagnoseMaxWeeklyHours(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,
@@ -465,11 +465,49 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             }
         }
 
+        // Boundary context: hours already worked in the SAME ISO week but on days outside the bitmap
+        // (e.g. a period that starts/ends mid-week, with the rest of that week in the adjacent period).
+        // Without this, a swap could push the real calendar week over MaxWeeklyHours undetected — the
+        // leak this check closes. Break assignments are excluded (IsWorkingAssignment is false for
+        // Break), so Break hours never count toward the weekly cap, matching the in-bitmap rule.
+        totalHours += BoundaryHoursInWeek(receivingAgent.Id, targetWeek, bitmap.Days[0], bitmap.Days[^1]);
+
         if (totalHours > receivingAgent.MaxWeeklyHours)
         {
             return $"MaxWeeklyHours exceeded: week total would be {totalHours:F1}h, cap is {receivingAgent.MaxWeeklyHours}h";
         }
         return null;
+    }
+
+    /// <summary>
+    /// Sums the working hours of boundary assignments that fall in <paramref name="targetWeek"/> but
+    /// on days strictly outside the bitmap range. Mirrors the boundary awareness of the MinPause and
+    /// MaxConsecutiveDays checks. A full week (7 days) on each side is scanned, which the
+    /// ContextDaysBefore/After window (>= 14 days) always covers; <see cref="WeekOf"/> filters to the
+    /// exact ISO week so it stays consistent with the in-bitmap summation above.
+    /// </summary>
+    private decimal BoundaryHoursInWeek(string agentId, (int Year, int Week) targetWeek, DateOnly firstDay, DateOnly lastDay)
+    {
+        var hours = 0m;
+        for (var i = 1; i <= 6; i++)
+        {
+            var before = firstDay.AddDays(-i);
+            if (WeekOf(before) == targetWeek
+                && TryGetBoundaryAssignment(agentId, before, out var b)
+                && IsWorkingAssignment(b))
+            {
+                hours += b.Hours;
+            }
+
+            var after = lastDay.AddDays(i);
+            if (WeekOf(after) == targetWeek
+                && TryGetBoundaryAssignment(agentId, after, out var a)
+                && IsWorkingAssignment(a))
+            {
+                hours += a.Hours;
+            }
+        }
+        return hours;
     }
 
     private static (int Year, int Week) WeekOf(DateOnly date)
