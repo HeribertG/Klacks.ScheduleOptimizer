@@ -19,7 +19,7 @@ namespace Klacks.ScheduleOptimizer.Wizard4;
 /// elitism carries the immutable snapshot (the seed, always admissible against itself), so the best
 /// arrangement is never worse than the snapshot. Deterministic for a seeded config.
 /// </summary>
-public sealed class Wizard4OptimizationCore
+public sealed class Wizard4OptimizationCore : IWizard4OptimizationCore
 {
     /// <summary>Emergency-unlock score fraction of the row median, matching the harmonizer runner's default.</summary>
     private const double EmergencyUnlockThreshold = 0.5;
