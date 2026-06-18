@@ -10,7 +10,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Evolution;
 /// with linearly decreasing weights so upper rows dominate the result. The weighted average
 /// stays in [0,1] regardless of row count.
 /// </summary>
-public sealed class HarmonyFitnessEvaluator
+public sealed class HarmonyFitnessEvaluator : IBitmapFitnessEvaluator
 {
     private readonly HarmonyScorer _scorer;
 

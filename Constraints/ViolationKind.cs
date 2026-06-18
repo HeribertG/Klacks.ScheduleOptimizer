@@ -1,10 +1,11 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
-namespace Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
+namespace Klacks.ScheduleOptimizer.Constraints;
 
 /// <summary>
-/// Taxonomy of hard-constraint violations detected by the TokenConstraintChecker.
-/// Stage 0 of the fitness function counts the number of violations; target is 0.
+/// Engine-neutral taxonomy of hard-constraint violations. Produced by the plan-level
+/// <see cref="PlanConstraintChecker"/> and consumed by both the Wizard-1 token engine
+/// (via TokenConstraintChecker) and the composite objective gate.
 /// </summary>
 public enum ViolationKind
 {

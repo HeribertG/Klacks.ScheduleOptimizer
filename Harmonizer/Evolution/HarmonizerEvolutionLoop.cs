@@ -13,13 +13,13 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Evolution;
 /// </summary>
 public sealed class HarmonizerEvolutionLoop
 {
-    private readonly HarmonyFitnessEvaluator _fitness;
+    private readonly IBitmapFitnessEvaluator _fitness;
     private readonly StochasticBitmapMutation _stochasticMutation;
     private readonly Func<int, HarmonizerConductor> _conductorFactory;
     private readonly HarmonizerEvolutionConfig _config;
 
     public HarmonizerEvolutionLoop(
-        HarmonyFitnessEvaluator fitness,
+        IBitmapFitnessEvaluator fitness,
         StochasticBitmapMutation stochasticMutation,
         Func<int, HarmonizerConductor> conductorFactory,
         HarmonizerEvolutionConfig config)
