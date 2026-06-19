@@ -25,6 +25,7 @@ public sealed class PlanConstraintChecker
         CheckBreakBlocker(assignments, context, violations);
         CheckMaxConsecutiveDays(assignments, context, violations);
         CheckMinPauseHours(assignments, context, violations);
+        CheckOverlap(assignments, violations);
         CheckMaxDailyHours(assignments, context, violations);
         CheckMaximumHoursExceeded(assignments, context, violations);
         CheckQualificationMismatch(assignments, context, violations);
@@ -241,6 +242,47 @@ public sealed class PlanConstraintChecker
                         ordered[i].Date,
                         ordered[i].BlockId,
                         $"Gap between tokens is {gapHours:F1}h, min is {minPause}h."));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Flags a same-agent shift OVERLAP (one human in two places). The MinPause check above only fires on
+    /// a non-negative gap that is too short; a true overlap produces a negative gap it deliberately skips,
+    /// and there is no other temporal-collision rule — so without this check a force-assigned double-booking
+    /// scores zero hard violations. Per agent the assignments are swept in start order against the running
+    /// maximum end time, which also catches multi-shift and cross-midnight overlaps.
+    /// </summary>
+    private static void CheckOverlap(IReadOnlyList<AssignmentView> assignments, List<ConstraintViolation> violations)
+    {
+        foreach (var perAgent in assignments.GroupBy(t => t.AgentId))
+        {
+            var ordered = perAgent
+                .Where(a => a.StartAt != default && a.EndAt != default)
+                .OrderBy(a => a.StartAt)
+                .ToList();
+            if (ordered.Count < 2)
+            {
+                continue;
+            }
+
+            var maxEnd = ordered[0].EndAt;
+            for (var i = 1; i < ordered.Count; i++)
+            {
+                if (ordered[i].StartAt < maxEnd)
+                {
+                    violations.Add(new ConstraintViolation(
+                        ViolationKind.Overlap,
+                        perAgent.Key,
+                        ordered[i].Date,
+                        ordered[i].BlockId,
+                        $"Agent {perAgent.Key} is double-booked: a shift starting {ordered[i].StartAt:yyyy-MM-dd HH:mm} overlaps an earlier shift ending {maxEnd:yyyy-MM-dd HH:mm}."));
+                }
+
+                if (ordered[i].EndAt > maxEnd)
+                {
+                    maxEnd = ordered[i].EndAt;
                 }
             }
         }

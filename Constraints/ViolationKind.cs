@@ -20,4 +20,5 @@ public enum ViolationKind
     UnderSupply,
     OverSupply,
     QualificationMissing,
+    Overlap,
 }
