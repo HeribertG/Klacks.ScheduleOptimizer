@@ -65,9 +65,12 @@ public record CoreAgent(
     /// <summary>Surcharge percentage for holiday shifts.</summary>
     public decimal HolidayRate { get; init; } = 0;
 
-    /// <summary>Surcharge percentage for Saturday shifts.</summary>
-    public decimal SaRate { get; init; } = 0;
+    /// <summary>Surcharge percentage for the 1st configured weekend day (country-neutral weekend slot).</summary>
+    public decimal WE1Rate { get; init; } = 0;
 
-    /// <summary>Surcharge percentage for Sunday shifts.</summary>
-    public decimal SoRate { get; init; } = 0;
+    /// <summary>Surcharge percentage for the 2nd configured weekend day (country-neutral weekend slot).</summary>
+    public decimal WE2Rate { get; init; } = 0;
+
+    /// <summary>Surcharge percentage for the 3rd configured weekend day (country-neutral weekend slot).</summary>
+    public decimal WE3Rate { get; init; } = 0;
 }

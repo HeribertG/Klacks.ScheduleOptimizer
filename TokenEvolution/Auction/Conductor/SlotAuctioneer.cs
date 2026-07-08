@@ -236,8 +236,8 @@ public sealed class SlotAuctioneer
         }
         var rate = 0m;
         if (shiftTypeIndex == 2) rate += agent.NightRate;
-        if (date.DayOfWeek == DayOfWeek.Saturday) rate += agent.SaRate;
-        if (date.DayOfWeek == DayOfWeek.Sunday) rate += agent.SoRate;
+        if (date.DayOfWeek == DayOfWeek.Saturday) rate += agent.WE1Rate;
+        if (date.DayOfWeek == DayOfWeek.Sunday) rate += agent.WE2Rate;
         if (rate <= 0) return 0m;
         return totalHours * rate;
     }
