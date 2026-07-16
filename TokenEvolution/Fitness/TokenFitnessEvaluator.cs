@@ -84,6 +84,38 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         scenario.HardViolations = scenario.FitnessStage0;
     }
 
+    /// <summary>
+    /// Runs the full evaluation and additionally exposes the Stage-3/Stage-4 component breakdown that
+    /// <see cref="Evaluate"/> computes internally and discards. Intended for a single call on the winning
+    /// individual at run-end — it re-runs the shared private component methods, so the hot
+    /// <see cref="Evaluate"/> path stays untouched (no extra allocations per generation). The returned
+    /// stage aggregates are taken verbatim from the scenario filled by <see cref="Evaluate"/>.
+    /// </summary>
+    public DetailedFitnessResult EvaluateDetailed(CoreScenario scenario, CoreWizardContext context)
+    {
+        Evaluate(scenario, context);
+
+        var stage3 = new Stage3Components(
+            BlockOrder: ComputeBlockOrderingScore(scenario, context),
+            Blacklist: ComputeBlacklistScore(scenario, context),
+            Location: ComputeLocationContinuityScore(scenario),
+            MaxGap: ComputeMaxOptimalGapScore(scenario, context));
+
+        var stage4 = new Stage4Components(
+            Fairness: ComputeFairnessScore(scenario, context),
+            MinimumHours: ComputeMinimumHoursScore(scenario, context),
+            BlockSymmetry: ComputeBlockSymmetryScore(scenario));
+
+        return new DetailedFitnessResult(
+            Stage0: scenario.FitnessStage0,
+            Stage1: scenario.FitnessStage1,
+            Stage2: scenario.FitnessStage2,
+            Stage3: scenario.FitnessStage3,
+            Stage4: scenario.FitnessStage4,
+            Stage3Components: stage3,
+            Stage4Components: stage4);
+    }
+
     public int Compare(CoreScenario? x, CoreScenario? y)
     {
         if (x is null && y is null)
