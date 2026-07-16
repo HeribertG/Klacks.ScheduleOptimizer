@@ -50,7 +50,8 @@ public sealed class TokenEvolutionLoop
             new AuctionTokenStrategy(),
             new CoverageFirstTokenStrategy(),
             new GreedyTokenStrategy(),
-            new RandomTokenStrategy());
+            new RandomTokenStrategy(),
+            new WarmStartTokenStrategy());
         return new TokenEvolutionLoop(
             builder,
             new BlockCrossover(),
@@ -76,7 +77,7 @@ public sealed class TokenEvolutionLoop
 
         var t0 = sw.ElapsedMilliseconds;
         var population = _populationBuilder
-            .BuildPopulation(context, config.PopulationSize, rng, cancellationToken, trace, config.InitAuctionRatio)
+            .BuildPopulation(context, config.PopulationSize, rng, cancellationToken, trace, config.InitAuctionRatio, config.InitWarmStartRatio)
             .ToList();
         trace?.Invoke($"Run: BuildPopulation done in {sw.ElapsedMilliseconds - t0}ms ({population.Count} scenarios)");
         cancellationToken.ThrowIfCancellationRequested();

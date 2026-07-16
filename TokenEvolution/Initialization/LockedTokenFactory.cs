@@ -21,72 +21,26 @@ public static class LockedTokenFactory
     public static IReadOnlyList<CoreToken> BuildLockedTokens(
         IReadOnlyList<CoreLockedWork> lockedWorks,
         int maxConsecutiveDays)
-    {
-        if (lockedWorks.Count == 0)
-        {
-            return [];
-        }
-
-        var result = new List<CoreToken>(lockedWorks.Count);
-        var grouped = lockedWorks
-            .GroupBy(w => w.AgentId)
-            .OrderBy(g => g.Key, StringComparer.Ordinal);
-
-        foreach (var perAgent in grouped)
-        {
-            var sorted = perAgent
-                .OrderBy(w => w.Date)
-                .ThenBy(w => w.StartAt)
-                .ToList();
-
-            Guid currentBlock = Guid.NewGuid();
-            int positionInBlock = 0;
-            int distinctDayCount = 1;
-            DateOnly lastDate = sorted[0].Date;
-
-            foreach (var work in sorted)
+        => ConsecutiveDayBlockAssigner.Assign(
+            lockedWorks,
+            w => w.AgentId,
+            w => w.Date,
+            w => w.StartAt,
+            maxConsecutiveDays,
+            (work, blockId, positionInBlock) => new CoreToken(
+                WorkIds: [work.WorkId],
+                ShiftTypeIndex: work.ShiftTypeIndex,
+                Date: work.Date,
+                TotalHours: work.TotalHours,
+                StartAt: work.StartAt,
+                EndAt: work.EndAt,
+                BlockId: blockId,
+                PositionInBlock: positionInBlock,
+                IsLocked: true,
+                LocationContext: work.LocationContext,
+                ShiftRefId: work.ShiftRefId,
+                AgentId: work.AgentId)
             {
-                var isFirst = ReferenceEquals(work, sorted[0]);
-                if (!isFirst)
-                {
-                    if (work.Date == lastDate)
-                    {
-                        positionInBlock++;
-                    }
-                    else if (work.Date == lastDate.AddDays(1) && distinctDayCount < maxConsecutiveDays)
-                    {
-                        positionInBlock++;
-                        distinctDayCount++;
-                    }
-                    else
-                    {
-                        currentBlock = Guid.NewGuid();
-                        positionInBlock = 0;
-                        distinctDayCount = 1;
-                    }
-
-                    lastDate = work.Date;
-                }
-
-                result.Add(new CoreToken(
-                    WorkIds: [work.WorkId],
-                    ShiftTypeIndex: work.ShiftTypeIndex,
-                    Date: work.Date,
-                    TotalHours: work.TotalHours,
-                    StartAt: work.StartAt,
-                    EndAt: work.EndAt,
-                    BlockId: currentBlock,
-                    PositionInBlock: positionInBlock,
-                    IsLocked: true,
-                    LocationContext: work.LocationContext,
-                    ShiftRefId: work.ShiftRefId,
-                    AgentId: work.AgentId)
-                {
-                    Surcharges = work.Surcharges,
-                });
-            }
-        }
-
-        return result;
-    }
+                Surcharges = work.Surcharges,
+            });
 }

@@ -8,6 +8,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution;
 /// </summary>
 public sealed record TokenEvolutionConfig
 {
+    private const double DefaultInitWarmStartRatio = 0.2;
+
     public int PopulationSize { get; init; } = 50;
 
     public int MaxGenerations { get; init; } = 200;
@@ -36,6 +38,9 @@ public sealed record TokenEvolutionConfig
 
     /// <summary>Share of auction-built scenarios in the initial population (0..1). Default 0.5.</summary>
     public double InitAuctionRatio { get; init; } = 0.5;
+
+    /// <summary>Share of warm-start scenarios (seeded from the last accepted previous-period plan) in the initial population (0..0.4; clamped). Default 0.2.</summary>
+    public double InitWarmStartRatio { get; init; } = DefaultInitWarmStartRatio;
 
     /// <summary>Stage-1 exponential decay factor per roster rank (0..1). Weights WHO reaches the guaranteed hours: 1.0 = every agent counts equally (index-blind), lower = satisfying top-roster agents dominates. Implements the top-down roster rule.</summary>
     public double FitnessStage1RankDecay { get; init; } = 0.85;

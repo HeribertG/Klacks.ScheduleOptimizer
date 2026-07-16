@@ -27,6 +27,12 @@ public class CoreWizardContext
 
     public IReadOnlyList<CoreLockedWork> LockedWorks { get; init; } = [];
 
+    /// <summary>
+    /// Assignments from the last accepted plan of the previous period, already mapped onto this period's
+    /// date axis. Seeds the warm-start population strategy. Empty means no warm-start (new group / no prior plan).
+    /// </summary>
+    public IReadOnlyList<CoreWarmStartAssignment> WarmStartAssignments { get; init; } = [];
+
     /// <summary>Unlocked existing Works in the period; veto source for Stage 0 only, never lifted into the genome.</summary>
     public IReadOnlyList<CoreExistingWorkBlocker> ExistingWorkBlockers { get; init; } = [];
 
