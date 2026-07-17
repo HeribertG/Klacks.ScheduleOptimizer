@@ -76,6 +76,16 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     /// </summary>
     public string? Diagnose(HarmonyBitmap bitmap, ReplaceMove move)
     {
+        // K16 RestrictedTimeWindow invariant: no seasonal forbidden-window veto is mirrored here,
+        // and none is needed. This validator only ever receives a same-day ReplaceMove, whose swap
+        // moves whole Cell objects between two rows on ONE day column, preserving each cell's
+        // (calendar day, shift, time-of-day). The K16 veto (CoreRestrictedTimeWindow.Blocks) is a
+        // pure function of exactly those three and is agent-independent, so a same-day swap can only
+        // change which agent owns an existing slot, never relocate a compliant slot into the window;
+        // it cannot introduce a new K16 violation. Cross-day moves DO change a cell's day; they never
+        // reach this same-day method (they are routed through Wizard 3's PlanMutationValidator cross-day
+        // branch, which mirrors this veto for both relocated cells at their target day - that path closes
+        // the seasonal-window gap that only cross-day relocation can open).
         var local = DiagnoseBitmapLocal(bitmap, move);
         if (local is not null)
         {

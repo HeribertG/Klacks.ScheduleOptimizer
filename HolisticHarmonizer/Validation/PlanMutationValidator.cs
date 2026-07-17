@@ -3,6 +3,7 @@
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
+using Klacks.ScheduleOptimizer.Models;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 
@@ -18,10 +19,14 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 public sealed class PlanMutationValidator
 {
     private readonly DomainAwareReplaceValidator _domainValidator;
+    private readonly IReadOnlyList<CoreRestrictedTimeWindow> _restrictedTimeWindows;
 
-    public PlanMutationValidator(DomainAwareReplaceValidator domainValidator)
+    public PlanMutationValidator(
+        DomainAwareReplaceValidator domainValidator,
+        IReadOnlyList<CoreRestrictedTimeWindow>? restrictedTimeWindows = null)
     {
         _domainValidator = domainValidator;
+        _restrictedTimeWindows = restrictedTimeWindows ?? [];
     }
 
     public PlanMutationRejection? Validate(HarmonyBitmap bitmap, PlanCellSwap swap)
@@ -66,6 +71,26 @@ public sealed class PlanMutationValidator
                     "Cross-day swap would change daily work coverage: one cell is work, the other is free. Only swap two cells with the same work-or-free state across different days.");
             }
 
+            // K16 RestrictedTimeWindow hard veto. A cross-day swap relocates each cell to a different
+            // calendar day; the apply path re-anchors the persisted work to that new date
+            // (HarmonizerApplyService.RepointClonedWorksAsync / BuildBulkItems set CurrentDate to
+            // bitmap.Days[day] while preserving the time-of-day), so the seasonal window classification can
+            // flip and a compliant slot can land inside a forbidden window. Both moved sides are checked at
+            // their TARGET day (cellB lands on dayA, cellA lands on dayB). Always hard, independent of any
+            // enforcement mode - identical doctrine to Wizard 1's Stage0HardConstraintChecker. The same-day
+            // path never changes a cell's day and so needs no such check.
+            var windowBlockB = DiagnoseRestrictedWindow(bitmap, cellB, swap.DayA);
+            if (windowBlockB is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, windowBlockB);
+            }
+
+            var windowBlockA = DiagnoseRestrictedWindow(bitmap, cellA, swap.DayB);
+            if (windowBlockA is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, windowBlockA);
+            }
+
             // Cross-day swaps do not delegate to the same-day domain validator, so the qualification
             // gate is applied here directly for both receiving sides (rowA gets cellB on dayA,
             // rowB gets cellA on dayB).
@@ -102,6 +127,41 @@ public sealed class PlanMutationValidator
 
     private static bool IsWork(CellSymbol symbol)
         => symbol == CellSymbol.Early || symbol == CellSymbol.Late || symbol == CellSymbol.Night || symbol == CellSymbol.Other;
+
+    /// <summary>
+    /// Returns a rejection reason if moving <paramref name="movedCell"/> onto <paramref name="toDay"/> lands it
+    /// inside a K16 forbidden window, otherwise null. The cell's interval is re-anchored onto the target day at
+    /// its original time-of-day, preserving its duration (exactly as the persist path re-anchors the work). The
+    /// cell's own <see cref="Cell.StartAt"/> date is never trusted as the source day, so a cell relocated more
+    /// than once in the same run is still evaluated against its true target day. The re-anchored slot is then
+    /// tested against every window via <see cref="CoreRestrictedTimeWindow.Blocks"/>. Free/Break and shiftless
+    /// cells never block.
+    /// </summary>
+    private string? DiagnoseRestrictedWindow(HarmonyBitmap bitmap, Cell movedCell, int toDay)
+    {
+        if (_restrictedTimeWindows.Count == 0
+            || movedCell.ShiftRefId is not Guid shiftRefId
+            || shiftRefId == Guid.Empty
+            || movedCell.StartAt == default
+            || movedCell.EndAt == default)
+        {
+            return null;
+        }
+
+        var duration = movedCell.EndAt - movedCell.StartAt;
+        var slotStart = bitmap.Days[toDay].ToDateTime(TimeOnly.FromDateTime(movedCell.StartAt));
+        var slotEnd = slotStart.Add(duration);
+
+        foreach (var window in _restrictedTimeWindows)
+        {
+            if (window.Blocks(slotStart, slotEnd, shiftRefId))
+            {
+                return $"Cross-day swap would place shift {movedCell.Symbol} into a RestrictedTimeWindow (K16) on {bitmap.Days[toDay]:yyyy-MM-dd}.";
+            }
+        }
+
+        return null;
+    }
 
     public static void Apply(HarmonyBitmap bitmap, PlanCellSwap swap)
     {

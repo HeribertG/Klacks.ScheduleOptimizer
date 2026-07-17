@@ -25,6 +25,14 @@ public class CoreWizardContext
 
     public IReadOnlyList<CoreBreakBlocker> BreakBlockers { get; init; } = [];
 
+    /// <summary>
+    /// Seasonal daily forbidden-time windows (K16). Each carries the fully resolved set of restricted shift
+    /// ids for its group tag (empty tag = all period shifts). The Stage-0 filter vetoes any slot overlapping
+    /// such a window ALWAYS - hard, like a break blocker, even when the compliance enforcement mode is only
+    /// warn - so the GA lays split shifts automatically around the window. Empty means no K16 rule applies.
+    /// </summary>
+    public IReadOnlyList<CoreRestrictedTimeWindow> RestrictedTimeWindows { get; init; } = [];
+
     public IReadOnlyList<CoreLockedWork> LockedWorks { get; init; } = [];
 
     /// <summary>

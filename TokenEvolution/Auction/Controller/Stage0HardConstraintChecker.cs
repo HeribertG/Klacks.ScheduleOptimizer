@@ -213,7 +213,37 @@ public sealed class Stage0HardConstraintChecker
                 $"Agent {agent.Id} would have less than {agent.MinRestHours}h rest before/after {slot.StartTime}-{slot.EndTime} on {date.Value:yyyy-MM-dd}.");
         }
 
+        if (IsBlockedByRestrictedWindow(slot, date.Value, context.RestrictedTimeWindows))
+        {
+            return new VetoVerdict(0, "RestrictedTimeWindow",
+                $"Shift {slot.Id} on {date.Value:yyyy-MM-dd} at {slot.StartTime}-{slot.EndTime} falls inside a seasonal restricted time window.");
+        }
+
         return null;
+    }
+
+    // K16 seasonal daily forbidden-time window - mirrors SlotConstraintFilter. Always a hard veto,
+    // independent of the compliance enforcement mode. Empty window set or an unparseable/empty shift id
+    // (no scope to match) = no veto.
+    private static bool IsBlockedByRestrictedWindow(
+        CoreShift slot, DateOnly date, IReadOnlyList<CoreRestrictedTimeWindow> windows)
+    {
+        if (windows.Count == 0
+            || !Guid.TryParse(slot.Id, out var shiftRefId)
+            || !TryGetSlotInterval(slot, date, out var slotStartUtc, out var slotEndUtc))
+        {
+            return false;
+        }
+
+        foreach (var window in windows)
+        {
+            if (window.Blocks(slotStartUtc, slotEndUtc, shiftRefId))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool RespectsWeekday(CoreAgent agent, DayOfWeek day) => day switch

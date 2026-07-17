@@ -103,6 +103,11 @@ public static class SlotConstraintFilter
                 return false;
             }
 
+            if (IsBlockedByRestrictedWindow(shiftRefId, slotStartUtc.Value, slotEndUtc.Value, context.RestrictedTimeWindows))
+            {
+                return false;
+            }
+
             if (ViolatesMinPauseHours(agent, slotStartUtc.Value, slotEndUtc.Value, alreadyAssigned, context))
             {
                 return false;
@@ -110,6 +115,23 @@ public static class SlotConstraintFilter
         }
 
         return true;
+    }
+
+    // K16 seasonal daily forbidden-time window. Always a hard veto (like a break blocker), independent of
+    // the compliance enforcement mode, so the GA never seeds a restricted shift into a banned window and
+    // instead lays split shifts around it. Empty window set = no-op.
+    private static bool IsBlockedByRestrictedWindow(
+        Guid shiftRefId, DateTime slotStart, DateTime slotEnd, IReadOnlyList<CoreRestrictedTimeWindow> windows)
+    {
+        foreach (var window in windows)
+        {
+            if (window.Blocks(slotStart, slotEnd, shiftRefId))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool HasOverlappingShift(
