@@ -88,17 +88,7 @@ public static class SlotConstraintFilter
 
         if (slotStartUtc.HasValue && slotEndUtc.HasValue)
         {
-            if (HasOverlappingShift(agent.Id, slotStartUtc.Value, slotEndUtc.Value, alreadyAssigned))
-            {
-                return false;
-            }
-
-            if (HasOverlappingExistingWork(agent.Id, slotStartUtc.Value, slotEndUtc.Value, context.ExistingWorkBlockers))
-            {
-                return false;
-            }
-
-            if (HasOverlappingExistingWork(agent.Id, slotStartUtc.Value, slotEndUtc.Value, context.BoundaryExistingWorkBlockers))
+            if (HasHardTemporalCollision(agent.Id, slotStartUtc.Value, slotEndUtc.Value, context, alreadyAssigned))
             {
                 return false;
             }
@@ -126,6 +116,52 @@ public static class SlotConstraintFilter
         foreach (var window in windows)
         {
             if (window.Blocks(slotStart, slotEnd, shiftRefId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Physical double booking: the slot overlaps another assignment of the same agent, an existing work
+    /// inside or next to the period, or a locked work on the boundary days. Bundled so the forced
+    /// coverage path can veto collisions even where the soft rules are deliberately skipped - a plan may
+    /// leave a slot open, but it may never put one agent in two places at once. Boundary locked works
+    /// used to be checked for the rest gap only, and a rest-gap check reports no violation on a real
+    /// overlap, so an overnight boundary shift passed even the fully validated path.
+    /// </summary>
+    /// <param name="agentId">Agent the slot would be assigned to.</param>
+    /// <param name="slotStart">Start of the slot in UTC.</param>
+    /// <param name="slotEnd">End of the slot in UTC.</param>
+    /// <param name="context">Wizard context holding the external blockers.</param>
+    /// <param name="alreadyAssigned">Tokens placed so far, including locked ones.</param>
+    public static bool HasHardTemporalCollision(
+        string agentId,
+        DateTime slotStart,
+        DateTime slotEnd,
+        CoreWizardContext context,
+        IReadOnlyList<CoreToken> alreadyAssigned)
+    {
+        if (HasOverlappingShift(agentId, slotStart, slotEnd, alreadyAssigned))
+        {
+            return true;
+        }
+
+        if (HasOverlappingExistingWork(agentId, slotStart, slotEnd, context.ExistingWorkBlockers))
+        {
+            return true;
+        }
+
+        if (HasOverlappingExistingWork(agentId, slotStart, slotEnd, context.BoundaryExistingWorkBlockers))
+        {
+            return true;
+        }
+
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            if (locked.AgentId == agentId && locked.StartAt < slotEnd && slotStart < locked.EndAt)
             {
                 return true;
             }

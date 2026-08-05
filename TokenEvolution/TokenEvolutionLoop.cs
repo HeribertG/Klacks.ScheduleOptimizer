@@ -1,5 +1,7 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
+using System.Runtime.ExceptionServices;
+using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
@@ -17,6 +19,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution;
 /// </summary>
 public sealed class TokenEvolutionLoop
 {
+    private const int SequentialParallelism = 1;
+
     private readonly TokenPopulationBuilder _populationBuilder;
     private readonly BlockCrossover _crossover;
     private readonly TokenSwapMutation _swap;
@@ -83,18 +87,10 @@ public sealed class TokenEvolutionLoop
         cancellationToken.ThrowIfCancellationRequested();
 
         t0 = sw.ElapsedMilliseconds;
-        var idx = 0;
-        foreach (var scenario in population)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            evaluator.Evaluate(scenario, context);
-            idx++;
-            if (idx % 10 == 0)
-            {
-                trace?.Invoke($"Run: initial Evaluate {idx}/{population.Count} at {sw.ElapsedMilliseconds - t0}ms");
-            }
-        }
-        trace?.Invoke($"Run: initial Evaluate done in {sw.ElapsedMilliseconds - t0}ms");
+        EvaluationContext.For(context);
+        var parallelism = ResolveParallelism(config);
+        EvaluateAll(population, evaluator, context, parallelism, cancellationToken);
+        trace?.Invoke($"Run: initial Evaluate done in {sw.ElapsedMilliseconds - t0}ms (parallelism {parallelism})");
 
         var best = SelectBest(population, evaluator);
         var generationsNoImprovement = 0;
@@ -115,7 +111,8 @@ public sealed class TokenEvolutionLoop
                 .Take(config.ElitismCount)
                 .ToList();
 
-            while (next.Count < config.PopulationSize)
+            var children = new List<CoreScenario>(Math.Max(0, config.PopulationSize - next.Count));
+            while (next.Count + children.Count < config.PopulationSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var p1 = TournamentSelect(population, config.TournamentK, evaluator, rng);
@@ -130,9 +127,11 @@ public sealed class TokenEvolutionLoop
                     child = ApplyWeightedMutation(child, context, rng, config);
                 }
 
-                evaluator.Evaluate(child, context);
-                next.Add(child);
+                children.Add(child);
             }
+
+            EvaluateAll(children, evaluator, context, parallelism, cancellationToken);
+            next.AddRange(children);
 
             population = next;
             var currentBest = SelectBest(population, evaluator);
@@ -247,6 +246,50 @@ public sealed class TokenEvolutionLoop
 
         return best;
     }
+
+    /// <summary>
+    /// Scores a set of scenarios, in parallel when the configuration allows it. The result is identical
+    /// to a sequential run: every random draw happens in the breeding phase before this is called, the
+    /// evaluation itself draws no randomness, and each scenario is written only by the thread that owns
+    /// it. Tournament selection reads the PREVIOUS generation, so no child's fitness is read before this
+    /// method returns.
+    /// </summary>
+    private static void EvaluateAll(
+        IReadOnlyList<CoreScenario> scenarios,
+        TokenFitnessEvaluator evaluator,
+        CoreWizardContext context,
+        int parallelism,
+        CancellationToken cancellationToken)
+    {
+        if (parallelism <= SequentialParallelism || scenarios.Count <= SequentialParallelism)
+        {
+            foreach (var scenario in scenarios)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                evaluator.Evaluate(scenario, context);
+            }
+
+            return;
+        }
+
+        try
+        {
+            Parallel.ForEach(
+                scenarios,
+                new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellationToken },
+                scenario => evaluator.Evaluate(scenario, context));
+        }
+        catch (AggregateException ex) when (ex.InnerExceptions.Count == 1)
+        {
+            // Callers report the failure message to the user and the job store. Wrapping a single
+            // evaluator error in "One or more errors occurred" would replace a diagnosable message with
+            // a generic one purely because the loop happens to run in parallel.
+            ExceptionDispatchInfo.Capture(ex.InnerExceptions[0]).Throw();
+        }
+    }
+
+    private static int ResolveParallelism(TokenEvolutionConfig config)
+        => config.EvaluationParallelism > 0 ? config.EvaluationParallelism : Environment.ProcessorCount;
 
     private static CoreScenario SelectBest(IReadOnlyList<CoreScenario> population, IComparer<CoreScenario> comparer)
     {

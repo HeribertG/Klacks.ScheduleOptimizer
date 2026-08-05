@@ -56,7 +56,10 @@ public sealed class RandomTokenStrategy : ITokenPopulationStrategy
                 IsLocked: false,
                 LocationContext: null,
                 ShiftRefId: shiftRefId,
-                AgentId: chosen.Id));
+                AgentId: chosen.Id)
+            {
+                Surcharges = SurchargeEstimator.Estimate(slotHours, shiftTypeIndex, slotDate.Value, chosen),
+            });
         }
 
         return new CoreScenario

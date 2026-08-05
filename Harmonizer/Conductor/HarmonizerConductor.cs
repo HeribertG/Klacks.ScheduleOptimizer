@@ -75,10 +75,13 @@ public sealed class HarmonizerConductor
             ? _maxIterationsPerRow * _hintRowIterationMultiplier
             : _maxIterationsPerRow;
 
+        var dayStride = Math.Max(1, bitmap.DayCount / iterationBudget);
+
         for (var iteration = 0; iteration < iterationBudget; iteration++)
         {
             ct.ThrowIfCancellationRequested();
-            var outcome = _mutation.FindBestMove(bitmap, rowIndex, lockedRows);
+            var startDay = bitmap.DayCount == 0 ? 0 : iteration * dayStride % bitmap.DayCount;
+            var outcome = _mutation.FindBestMove(bitmap, rowIndex, lockedRows, startDay);
             if (outcome.Move is not null)
             {
                 _mutation.Apply(bitmap, outcome.Move);
@@ -108,7 +111,7 @@ public sealed class HarmonizerConductor
                 break;
             }
 
-            var unlockedOutcome = _mutation.FindBestMove(bitmap, rowIndex, EmptySet);
+            var unlockedOutcome = _mutation.FindBestMove(bitmap, rowIndex, EmptySet, startDay);
             if (unlockedOutcome.Move is null)
             {
                 break;

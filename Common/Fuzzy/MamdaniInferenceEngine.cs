@@ -15,6 +15,7 @@ public sealed class MamdaniInferenceEngine
     private readonly double _outputMin;
     private readonly double _outputMax;
     private readonly int _samples;
+    private readonly double _noFireOutput;
 
     public MamdaniInferenceEngine(
         IReadOnlyDictionary<string, LinguisticVariable> inputs,
@@ -22,7 +23,8 @@ public sealed class MamdaniInferenceEngine
         IReadOnlyList<FuzzyRule> rules,
         double outputMin = 0.0,
         double outputMax = 1.0,
-        int samples = 100)
+        int samples = 100,
+        double noFireOutput = 0.0)
     {
         _inputs = inputs;
         _output = output;
@@ -30,6 +32,7 @@ public sealed class MamdaniInferenceEngine
         _outputMin = outputMin;
         _outputMax = outputMax;
         _samples = samples;
+        _noFireOutput = noFireOutput;
     }
 
     /// <summary>
@@ -69,7 +72,7 @@ public sealed class MamdaniInferenceEngine
 
         if (activations.Count == 0)
         {
-            return new InferenceResult(0.0, []);
+            return new InferenceResult(_noFireOutput, []);
         }
 
         var crispOutput = Defuzzify(activations);

@@ -217,29 +217,8 @@ public sealed class SlotAuctioneer
             ShiftRefId: Guid.TryParse(slot.Id, out var sr) ? sr : Guid.Empty,
             AgentId: agentId)
         {
-            Surcharges = EstimateSurcharges(totalHours, shiftTypeIndex, date, agent),
+            Surcharges = SurchargeEstimator.Estimate(totalHours, shiftTypeIndex, date, agent),
         };
-    }
-
-    /// <summary>
-    /// Rough surcharge estimate for the wizard planning fitness: applies the agent's contract rates
-    /// (Night/Sa/So) by shift type and weekday. Rates are stored as multipliers (0.10 = 10%), so the
-    /// estimate is simply hours x rate. Holiday rate is intentionally skipped because the wizard
-    /// does not load calendar selections — the actual surcharge will be computed precisely by
-    /// WorkMacroService at apply time.
-    /// </summary>
-    private static decimal EstimateSurcharges(decimal totalHours, int shiftTypeIndex, DateOnly date, CoreAgent? agent)
-    {
-        if (agent is null || totalHours <= 0)
-        {
-            return 0m;
-        }
-        var rate = 0m;
-        if (shiftTypeIndex == 2) rate += agent.NightRate;
-        if (date.DayOfWeek == DayOfWeek.Saturday) rate += agent.WE1Rate;
-        if (date.DayOfWeek == DayOfWeek.Sunday) rate += agent.WE2Rate;
-        if (rate <= 0) return 0m;
-        return totalHours * rate;
     }
 
     private static AgentRuntimeState ApplyAssignmentToState(AgentRuntimeState prev, CoreToken token)

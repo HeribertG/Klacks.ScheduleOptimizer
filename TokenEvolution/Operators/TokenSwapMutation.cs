@@ -56,8 +56,27 @@ public sealed class TokenSwapMutation : ITokenOperator
 
         var a = tokens[firstIdx];
         var b = tokens[secondIdx];
-        var swappedA = a with { AgentId = b.AgentId };
-        var swappedB = b with { AgentId = a.AgentId };
+
+        // Each half moves to a different agent, so both need the surcharges of their NEW holder -
+        // copying them along with the assignment falsifies the Stage-1 hours account.
+        var agentsById = new Dictionary<string, CoreAgent>(StringComparer.Ordinal);
+        foreach (var agent in context.Wizard.Agents)
+        {
+            agentsById[agent.Id] = agent;
+        }
+
+        var swappedA = a with
+        {
+            AgentId = b.AgentId,
+            Surcharges = SurchargeEstimator.Estimate(
+                a.TotalHours, a.ShiftTypeIndex, a.Date, agentsById.GetValueOrDefault(b.AgentId)),
+        };
+        var swappedB = b with
+        {
+            AgentId = a.AgentId,
+            Surcharges = SurchargeEstimator.Estimate(
+                b.TotalHours, b.ShiftTypeIndex, b.Date, agentsById.GetValueOrDefault(a.AgentId)),
+        };
         tokens[firstIdx] = swappedA;
         tokens[secondIdx] = swappedB;
 

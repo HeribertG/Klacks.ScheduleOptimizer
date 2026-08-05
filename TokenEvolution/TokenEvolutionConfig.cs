@@ -36,6 +36,13 @@ public sealed record TokenEvolutionConfig
 
     public int RandomSeed { get; init; } = 0;
 
+    /// <summary>
+    /// Degree of parallelism for scoring a generation. 0 uses <see cref="Environment.ProcessorCount"/>,
+    /// 1 evaluates sequentially (reference mode for determinism proofs), any other value pins the degree.
+    /// The result never depends on this: breeding stays sequential and evaluation draws no randomness.
+    /// </summary>
+    public int EvaluationParallelism { get; init; } = 0;
+
     /// <summary>Share of auction-built scenarios in the initial population (0..1). Default 0.5.</summary>
     public double InitAuctionRatio { get; init; } = 0.5;
 

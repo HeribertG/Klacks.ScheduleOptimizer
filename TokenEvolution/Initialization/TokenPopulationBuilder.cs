@@ -90,20 +90,12 @@ public sealed class TokenPopulationBuilder
         trace?.Invoke($"BuildPopulation: warmStart {warmStartCount} scenarios in {sw.ElapsedMilliseconds - tw}ms");
 
         var t0 = sw.ElapsedMilliseconds;
-        for (var i = 0; i < auctionCount; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            result.Add(_auction.BuildScenario(context, rng));
-        }
-        trace?.Invoke($"BuildPopulation: auction {auctionCount} scenarios in {sw.ElapsedMilliseconds - t0}ms");
+        AddDeterministicStrategy(_auction, auctionCount, result, context, rng, cancellationToken);
+        trace?.Invoke($"BuildPopulation: auction 1 base + {Math.Max(0, auctionCount - 1)} perturbed clones in {sw.ElapsedMilliseconds - t0}ms");
 
         t0 = sw.ElapsedMilliseconds;
-        for (var i = 0; i < coverageCount; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            result.Add(_coverageFirst.BuildScenario(context, rng));
-        }
-        trace?.Invoke($"BuildPopulation: coverageFirst {coverageCount} scenarios in {sw.ElapsedMilliseconds - t0}ms");
+        AddDeterministicStrategy(_coverageFirst, coverageCount, result, context, rng, cancellationToken);
+        trace?.Invoke($"BuildPopulation: coverageFirst 1 base + {Math.Max(0, coverageCount - 1)} perturbed clones in {sw.ElapsedMilliseconds - t0}ms");
 
         t0 = sw.ElapsedMilliseconds;
         for (var i = 0; i < greedyCount; i++)
@@ -122,5 +114,29 @@ public sealed class TokenPopulationBuilder
         trace?.Invoke($"BuildPopulation: random {randomCount} scenarios in {sw.ElapsedMilliseconds - t0}ms");
 
         return result;
+    }
+
+    private static void AddDeterministicStrategy(
+        ITokenPopulationStrategy strategy,
+        int count,
+        List<CoreScenario> result,
+        CoreWizardContext context,
+        Random rng,
+        CancellationToken cancellationToken)
+    {
+        if (count <= 0)
+        {
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var basis = strategy.BuildScenario(context, rng);
+        result.Add(basis);
+
+        for (var i = 1; i < count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            result.Add(ScenarioPerturbator.Perturb(basis, rng));
+        }
     }
 }

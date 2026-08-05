@@ -5,6 +5,8 @@
 /// All collections are read-only during the GA loop. Scheduling-Constants are loaded from settings up-front.
 /// </summary>
 
+using System.Threading;
+
 namespace Klacks.ScheduleOptimizer.Models;
 
 public class CoreWizardContext
@@ -92,6 +94,8 @@ public class CoreWizardContext
         => IneligibleAssignments.Count == 0
             || !IneligibleAssignments.Contains((agentId, shiftId, date));
 
+    /// <summary>Built once and then read from many threads during parallel evaluation, so the
+    /// initialisation must be a published-once write rather than a plain null check.</summary>
     private Dictionary<(string AgentId, DateOnly Date), bool>? _worksOnDateLookup;
 
     /// <summary>
@@ -106,8 +110,8 @@ public class CoreWizardContext
             return null;
         }
 
-        _worksOnDateLookup ??= BuildWorksOnDateLookup();
-        return _worksOnDateLookup.TryGetValue((agentId, date), out var worksOnDay)
+        var lookup = LazyInitializer.EnsureInitialized(ref _worksOnDateLookup, BuildWorksOnDateLookup);
+        return lookup.TryGetValue((agentId, date), out var worksOnDay)
             ? worksOnDay
             : null;
     }

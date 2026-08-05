@@ -21,4 +21,5 @@ public enum ViolationKind
     OverSupply,
     QualificationMissing,
     Overlap,
+    ExistingWorkOverlap,
 }

@@ -12,6 +12,8 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Scorer;
 /// </summary>
 public sealed class HarmonyScorer
 {
+    private const double NeutralNoFireScore = 0.5;
+
     private readonly MamdaniInferenceEngine _engine;
 
     public HarmonyScorer()
@@ -24,7 +26,8 @@ public sealed class HarmonyScorer
         _engine = new MamdaniInferenceEngine(
             HarmonyLinguisticVariables.BuildInputs(),
             HarmonyLinguisticVariables.BuildOutput(),
-            rules);
+            rules,
+            noFireOutput: NeutralNoFireScore);
     }
 
     public RowScore Score(HarmonyBitmap bitmap, int rowIndex)

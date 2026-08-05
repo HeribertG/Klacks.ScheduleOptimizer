@@ -117,7 +117,11 @@ public sealed class WarmStartTokenStrategy : ITokenPopulationStrategy
                     IsLocked: false,
                     LocationContext: null,
                     ShiftRefId: assignment.ShiftRefId,
-                    AgentId: assignment.AgentId);
+                    AgentId: assignment.AgentId)
+                {
+                    Surcharges = SurchargeEstimator.Estimate(
+                        assignment.TotalHours, shiftTypeIndex, assignment.Date, agent),
+                };
 
                 tokens.Add(token);
                 survivors.Add(token);

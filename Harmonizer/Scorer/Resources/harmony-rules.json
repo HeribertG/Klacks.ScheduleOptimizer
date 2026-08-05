@@ -51,17 +51,6 @@
     "then": { "var": "HarmonyScore", "is": "Good" }
   },
   {
-    "name": "AllMedium_Mediocre",
-    "if": [
-      { "var": "BlockSizeUniformity", "is": "Medium" },
-      { "var": "RestUniformity", "is": "Medium" },
-      { "var": "BlockHomogeneity", "is": "Medium" },
-      { "var": "TransitionCompliance", "is": "Medium" }
-    ],
-    "op": "AND",
-    "then": { "var": "HarmonyScore", "is": "Mediocre" }
-  },
-  {
     "name": "BSU_RU_Medium_Mediocre",
     "if": [
       { "var": "BlockSizeUniformity", "is": "Medium" },
@@ -102,18 +91,6 @@
     "if": [{ "var": "TransitionCompliance", "is": "Low" }],
     "op": "AND",
     "then": { "var": "HarmonyScore", "is": "Mediocre" }
-  },
-  {
-    "name": "BSU_High_alone_Good",
-    "if": [{ "var": "BlockSizeUniformity", "is": "High" }],
-    "op": "AND",
-    "then": { "var": "HarmonyScore", "is": "Good" }
-  },
-  {
-    "name": "BH_High_alone_Good",
-    "if": [{ "var": "BlockHomogeneity", "is": "High" }],
-    "op": "AND",
-    "then": { "var": "HarmonyScore", "is": "Good" }
   },
   {
     "name": "STR_Low_Mediocre",

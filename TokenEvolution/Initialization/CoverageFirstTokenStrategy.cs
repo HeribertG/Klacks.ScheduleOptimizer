@@ -60,6 +60,8 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
                 continue;
             }
 
+            var surcharges = SurchargeEstimator.Estimate(slotHours, shiftTypeIndex, slotDate, bestAgent);
+
             tokens.Add(new CoreToken(
                 WorkIds: [],
                 ShiftTypeIndex: shiftTypeIndex,
@@ -72,8 +74,11 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
                 IsLocked: false,
                 LocationContext: null,
                 ShiftRefId: shiftRefId,
-                AgentId: bestAgent.Id));
-            AddHours(hoursByAgent, bestAgent.Id, (double)slotHours);
+                AgentId: bestAgent.Id)
+            {
+                Surcharges = surcharges,
+            });
+            AddHours(hoursByAgent, bestAgent.Id, (double)(slotHours + surcharges));
             TrackBlock(blockState, bestAgent.Id, slotDate, shiftTypeIndex);
         }
 

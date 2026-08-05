@@ -42,7 +42,14 @@ public sealed class ReassignMutation : ITokenOperator
         }
 
         var newAgent = RosterPositionBias.PickAccuracyAware(validAgents, tokensWithoutCurrent, context.Wizard.Agents, context.Rng);
-        tokens[chosen.Index] = currentToken with { AgentId = newAgent.Id };
+        // Without re-estimating, the token would carry the PREVIOUS agent's night and weekend rates
+        // into the new agent's hours account.
+        tokens[chosen.Index] = currentToken with
+        {
+            AgentId = newAgent.Id,
+            Surcharges = SurchargeEstimator.Estimate(
+                currentToken.TotalHours, currentToken.ShiftTypeIndex, currentToken.Date, newAgent),
+        };
         return TokenSwapMutation.CloneScenario(context.Primary, tokens);
     }
 }

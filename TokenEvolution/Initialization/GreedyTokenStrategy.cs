@@ -75,6 +75,9 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                 var slotStartUtc = slotDate.ToDateTime(start);
                 var slotEndUtc = end <= start ? slotDate.AddDays(1).ToDateTime(end) : slotDate.ToDateTime(end);
 
+                var surcharges = SurchargeEstimator.Estimate(
+                    (decimal)chosen.Hours, shiftTypeIndex, slotDate, agent);
+
                 tokens.Add(new CoreToken(
                     WorkIds: [],
                     ShiftTypeIndex: shiftTypeIndex,
@@ -87,7 +90,10 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                     IsLocked: false,
                     LocationContext: null,
                     ShiftRefId: Guid.TryParse(chosen.Id, out var shiftRef) ? shiftRef : Guid.Empty,
-                    AgentId: agent.Id));
+                    AgentId: agent.Id)
+                {
+                    Surcharges = surcharges,
+                });
 
                 hoursAssigned[agent.Id] += chosen.Hours;
             }
@@ -142,6 +148,8 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                 continue;
             }
 
+            var surcharges = SurchargeEstimator.Estimate(slotHours, shiftTypeIndex, slotDate.Value, agent);
+
             tokens.Add(new CoreToken(
                 WorkIds: [],
                 ShiftTypeIndex: shiftTypeIndex,
@@ -154,7 +162,10 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                 IsLocked: false,
                 LocationContext: null,
                 ShiftRefId: Guid.TryParse(slot.Id, out var shiftRef) ? shiftRef : Guid.Empty,
-                AgentId: agent.Id));
+                AgentId: agent.Id)
+            {
+                Surcharges = surcharges,
+            });
 
             hoursAssigned[agent.Id] = hoursAssigned.TryGetValue(agent.Id, out var h) ? h + slot.Hours : slot.Hours;
         }
@@ -181,6 +192,13 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
             // Qualification is a hard gate even when coverage is forced (requireValid=false):
             // an unqualified agent is never an option, the slot stays empty instead of mis-staffed.
             if (shiftRefId != Guid.Empty && !context.IsEligible(agent.Id, shiftRefId, slotDate))
+            {
+                continue;
+            }
+
+            // A physical collision is a hard gate even when coverage is forced (requireValid=false):
+            // leaving the slot open is a plan with a gap, double booking one agent is not a plan at all.
+            if (SlotConstraintFilter.HasHardTemporalCollision(agent.Id, slotStartUtc, slotEndUtc, context, tokensSoFar))
             {
                 continue;
             }

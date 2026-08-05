@@ -20,10 +20,6 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// </param>
 public sealed class DomainAwareReplaceValidator : IReplaceValidator
 {
-    private static readonly Calendar IsoCalendar = CultureInfo.InvariantCulture.Calendar;
-    private const CalendarWeekRule WeekRule = CalendarWeekRule.FirstFourDayWeek;
-    private const DayOfWeek FirstDayOfWeek = DayOfWeek.Monday;
-
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
     private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
     private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _ineligibleAssignments;
@@ -523,7 +519,6 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     private static (int Year, int Week) WeekOf(DateOnly date)
     {
         var dt = date.ToDateTime(TimeOnly.MinValue);
-        var week = IsoCalendar.GetWeekOfYear(dt, WeekRule, FirstDayOfWeek);
-        return (date.Year, week);
+        return (ISOWeek.GetYear(dt), ISOWeek.GetWeekOfYear(dt));
     }
 }

@@ -47,7 +47,9 @@ public sealed class TokenRepair : ITokenOperator
         if (underSupply.Count > 0)
         {
             var pick = underSupply[context.Rng.Next(underSupply.Count)];
-            return RepairUnderSupply(context, pick);
+            return TryRepairUnderSupply(context.Primary, context.Wizard, context.Rng, pick, out var repaired)
+                ? repaired
+                : TokenSwapMutation.CloneScenario(context.Primary, context.Primary.Tokens.ToList());
         }
 
         var violation = violations[context.Rng.Next(violations.Count)];
@@ -69,6 +71,12 @@ public sealed class TokenRepair : ITokenOperator
     {
         var current = scenario;
         var iter = 0;
+
+        // The sweep only ADDS tokens, so a slot that could not be filled cannot become fillable later in
+        // the same call: the occupied agents grow monotonically and the capacity check never frees up.
+        // The set is per call - across generations fillability depends on the genome and must be retried.
+        var failedSlots = new HashSet<(Guid ShiftRefId, DateOnly Date)>();
+
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -98,11 +106,20 @@ public sealed class TokenRepair : ITokenOperator
             foreach (var violation in pending)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var attempt = RepairUnderSupply(new TokenOperatorContext(current, null, context, rng), violation);
-                if (attempt.Tokens.Count > current.Tokens.Count)
+                var slotKey = (violation.ShiftRefId!.Value, violation.Date!.Value);
+                if (failedSlots.Contains(slotKey))
                 {
-                    current = attempt;
+                    continue;
+                }
+
+                if (TryRepairUnderSupply(current, context, rng, violation, out var repaired))
+                {
+                    current = repaired;
                     progress = true;
+                }
+                else
+                {
+                    failedSlots.Add(slotKey);
                 }
             }
 
@@ -130,26 +147,49 @@ public sealed class TokenRepair : ITokenOperator
         return TokenSwapMutation.CloneScenario(context.Primary, remaining);
     }
 
-    private static CoreScenario RepairUnderSupply(TokenOperatorContext context, ConstraintViolation violation)
+    /// <summary>
+    /// Tries to staff one under-supplied slot. Returns false without cloning anything when the slot
+    /// cannot be filled - the sweep runs this for every pending violation of every generation, and
+    /// cloning the whole genome just to throw it away again was the dominant allocation of a repair pass.
+    /// </summary>
+    /// <param name="primary">Scenario to repair; never modified.</param>
+    /// <param name="wizard">Wizard context supplying agents, slots and rules.</param>
+    /// <param name="rng">Random source of the operator.</param>
+    /// <param name="violation">The under-supply violation to answer.</param>
+    /// <param name="repaired">The repaired scenario, valid only when the method returns true.</param>
+    private static bool TryRepairUnderSupply(
+        CoreScenario primary,
+        CoreWizardContext wizard,
+        Random rng,
+        ConstraintViolation violation,
+        out CoreScenario repaired)
     {
-        var tokens = context.Primary.Tokens.ToList();
+        repaired = primary;
 
         if (!violation.ShiftRefId.HasValue || !violation.Date.HasValue)
         {
-            return TokenSwapMutation.CloneScenario(context.Primary, tokens);
+            return false;
         }
 
-        var slot = FindSlot(context.Wizard, violation.ShiftRefId.Value, violation.Date.Value);
+        var slot = FindSlot(wizard, violation.ShiftRefId.Value, violation.Date.Value);
         if (slot is null)
         {
-            return TokenSwapMutation.CloneScenario(context.Primary, tokens);
+            return false;
         }
 
         var capacity = Math.Max(1, slot.RequiredAssignments);
-        var assigned = tokens.Count(t => t.ShiftRefId == violation.ShiftRefId.Value && t.Date == violation.Date.Value);
+        var assigned = 0;
+        foreach (var token in primary.Tokens)
+        {
+            if (token.ShiftRefId == violation.ShiftRefId.Value && token.Date == violation.Date.Value)
+            {
+                assigned++;
+            }
+        }
+
         if (assigned >= capacity)
         {
-            return TokenSwapMutation.CloneScenario(context.Primary, tokens);
+            return false;
         }
 
         var start = TimeOnly.TryParse(slot.StartTime, out var parsedStart) ? parsedStart : new TimeOnly(8, 0);
@@ -159,23 +199,24 @@ public sealed class TokenRepair : ITokenOperator
         var slotStartUtc = violation.Date.Value.ToDateTime(start);
         var slotEndUtc = end <= start ? violation.Date.Value.AddDays(1).ToDateTime(end) : violation.Date.Value.ToDateTime(end);
 
-        var occupiedAgents = tokens
+        var occupiedAgents = primary.Tokens
             .Where(t => t.ShiftRefId == violation.ShiftRefId.Value && t.Date == violation.Date.Value)
             .Select(t => t.AgentId)
             .ToHashSet(StringComparer.Ordinal);
 
-        var candidates = context.Wizard.Agents
+        var candidates = wizard.Agents
             .Where(agent => !occupiedAgents.Contains(agent.Id)
                 && SlotConstraintFilter.IsValidAssignment(
-                    agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours, context.Wizard, tokens, slotStartUtc, slotEndUtc))
+                    agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours, wizard, primary.Tokens, slotStartUtc, slotEndUtc))
             .ToList();
 
         if (candidates.Count == 0)
         {
-            return TokenSwapMutation.CloneScenario(context.Primary, tokens);
+            return false;
         }
 
-        var chosen = RosterPositionBias.PickAccuracyAware(candidates, tokens, context.Wizard.Agents, context.Rng);
+        var chosen = RosterPositionBias.PickAccuracyAware(candidates, primary.Tokens, wizard.Agents, rng);
+        var tokens = primary.Tokens.ToList();
         tokens.Add(new CoreToken(
             WorkIds: [],
             ShiftTypeIndex: shiftTypeIndex,
@@ -188,9 +229,13 @@ public sealed class TokenRepair : ITokenOperator
             IsLocked: false,
             LocationContext: null,
             ShiftRefId: violation.ShiftRefId.Value,
-            AgentId: chosen.Id));
+            AgentId: chosen.Id)
+        {
+            Surcharges = SurchargeEstimator.Estimate(slotHours, shiftTypeIndex, violation.Date.Value, chosen),
+        });
 
-        return TokenSwapMutation.CloneScenario(context.Primary, tokens);
+        repaired = TokenSwapMutation.CloneScenario(primary, tokens);
+        return true;
     }
 
     private static CoreScenario RepairOverSupply(TokenOperatorContext context, ConstraintViolation violation)
@@ -218,20 +263,12 @@ public sealed class TokenRepair : ITokenOperator
         return TokenSwapMutation.CloneScenario(context.Primary, remaining);
     }
 
+    /// <summary>
+    /// Resolves the slot definition from the frozen per-context index instead of scanning every shift
+    /// and formatting strings on each call. First match wins, as in the former linear search.
+    /// </summary>
     private static CoreShift? FindSlot(CoreWizardContext context, Guid shiftRefId, DateOnly date)
-    {
-        var targetDate = date.ToString("yyyy-MM-dd");
-        var targetId = shiftRefId.ToString();
-        foreach (var shift in context.Shifts)
-        {
-            if (shift.Date == targetDate && shift.Id == targetId)
-            {
-                return shift;
-            }
-        }
-
-        return null;
-    }
+        => EvaluationContext.For(context).SlotsByKey.GetValueOrDefault((shiftRefId, date));
 
     private static bool MatchesViolation(CoreToken token, ConstraintViolation violation)
     {

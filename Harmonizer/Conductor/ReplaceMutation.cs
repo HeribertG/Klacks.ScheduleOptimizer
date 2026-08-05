@@ -24,7 +24,7 @@ public sealed class ReplaceMutation
         _candidatesPerInvocation = candidatesPerInvocation;
     }
 
-    public ReplaceOutcome FindBestMove(HarmonyBitmap bitmap, int primaryRow, IReadOnlySet<int> lockedRows)
+    public ReplaceOutcome FindBestMove(HarmonyBitmap bitmap, int primaryRow, IReadOnlySet<int> lockedRows, int startDay = 0)
     {
         var primaryScoreBefore = _scorer.Score(bitmap, primaryRow).Score;
         ReplaceMove? bestMove = null;
@@ -32,7 +32,7 @@ public sealed class ReplaceMutation
         var bestPrimaryDelta = 0.0;
         var bestPartnerDelta = 0.0;
 
-        var candidates = EnumerateCandidates(bitmap, primaryRow, lockedRows);
+        var candidates = EnumerateCandidates(bitmap, primaryRow, lockedRows, startDay);
         foreach (var move in candidates)
         {
             if (!_validator.IsValid(bitmap, move))
@@ -76,11 +76,13 @@ public sealed class ReplaceMutation
 
     public void Apply(HarmonyBitmap bitmap, ReplaceMove move) => ApplySwap(bitmap, move);
 
-    private IEnumerable<ReplaceMove> EnumerateCandidates(HarmonyBitmap bitmap, int primaryRow, IReadOnlySet<int> lockedRows)
+    private IEnumerable<ReplaceMove> EnumerateCandidates(HarmonyBitmap bitmap, int primaryRow, IReadOnlySet<int> lockedRows, int startDay)
     {
         var produced = 0;
-        for (var day = 0; day < bitmap.DayCount && produced < _candidatesPerInvocation; day++)
+        for (var k = 0; k < bitmap.DayCount && produced < _candidatesPerInvocation; k++)
         {
+            var day = (startDay + k) % bitmap.DayCount;
+
             for (var partner = 0; partner < bitmap.RowCount && produced < _candidatesPerInvocation; partner++)
             {
                 if (partner == primaryRow)
