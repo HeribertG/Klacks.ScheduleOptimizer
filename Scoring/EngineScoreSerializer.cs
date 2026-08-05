@@ -20,7 +20,7 @@ namespace Klacks.ScheduleOptimizer.Scoring;
 /// </summary>
 public static class EngineScoreSerializer
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = SubScoreSchema.Version;
     public const string TokenEvolutionEngineTag = "tokenEvolution";
     public const string HarmonizerEngineTag = "harmonizer";
     public const string HolisticEngineTag = "holistic";

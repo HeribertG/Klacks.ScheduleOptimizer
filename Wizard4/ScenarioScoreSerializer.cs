@@ -2,6 +2,7 @@
 
 using System.Text.Json;
 using Klacks.ScheduleOptimizer.Objective;
+using Klacks.ScheduleOptimizer.Scoring;
 
 namespace Klacks.ScheduleOptimizer.Wizard4;
 
@@ -13,7 +14,7 @@ namespace Klacks.ScheduleOptimizer.Wizard4;
 /// </summary>
 public static class ScenarioScoreSerializer
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = SubScoreSchema.Version;
     public const string CompositeEngineTag = "composite";
 
     private static readonly JsonSerializerOptions Options = new()
