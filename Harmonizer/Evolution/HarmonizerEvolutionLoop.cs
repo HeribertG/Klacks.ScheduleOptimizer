@@ -103,16 +103,57 @@ public sealed class HarmonizerEvolutionLoop
         return new EvolutionResult(bestSoFar, generationFitness);
     }
 
+    /// <summary>
+    /// Wraps an already-evaluated bitmap as an individual that no conductor ever touched. The synthetic
+    /// trace reports every row as unchanged, so telemetry and row-result builders - which index
+    /// RowTraces by row - keep working. Used for the raw seed in the initial population and by the
+    /// caller-side regression gate.
+    /// </summary>
+    /// <param name="bitmap">The unprocessed bitmap.</param>
+    /// <param name="fitness">Fitness of that bitmap as returned by the evaluator.</param>
+    /// <param name="rowScores">Per-row scores; must hold one entry per bitmap row.</param>
+    public static Individual CreateUnprocessedIndividual(
+        HarmonyBitmap bitmap,
+        double fitness,
+        IReadOnlyList<double> rowScores)
+    {
+        var rowTraces = new RowTrace[bitmap.RowCount];
+        for (var r = 0; r < bitmap.RowCount; r++)
+        {
+            var score = r < rowScores.Count ? rowScores[r] : 0.0;
+            rowTraces[r] = new RowTrace(r, score, score, 0, false);
+        }
+
+        return new Individual(
+            bitmap,
+            fitness,
+            rowScores,
+            new ConductorResult(rowTraces, rowScores, rowScores));
+    }
+
+    private Individual CreateSeedIndividual(HarmonyBitmap seedClone)
+    {
+        var fitness = _fitness.Evaluate(seedClone);
+        return CreateUnprocessedIndividual(seedClone, fitness.Fitness, fitness.RowScores);
+    }
+
     private List<Individual> InitialisePopulation(
         HarmonyBitmap seed,
         Random random,
         CancellationToken ct,
         System.Diagnostics.Stopwatch stopwatch)
     {
+        // The raw seed is the anytime guarantee: it is always in the population, so the loop can
+        // never return something worse than the plan it started from.
         var population = new List<Individual>(_config.PopulationSize)
         {
-            EvaluateConductorPass(BitmapCloner.Clone(seed), random, ct),
+            CreateSeedIndividual(BitmapCloner.Clone(seed)),
         };
+
+        if (population.Count < _config.PopulationSize)
+        {
+            population.Add(EvaluateConductorPass(BitmapCloner.Clone(seed), random, ct));
+        }
 
         while (population.Count < _config.PopulationSize)
         {
