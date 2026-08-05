@@ -138,7 +138,13 @@ public sealed class TokenEvolutionLoop
             var currentBest = SelectBest(population, evaluator);
 
             var sweepStart = sw.ElapsedMilliseconds;
+            var preSweep = currentBest;
             currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
+            if (!ReferenceEquals(currentBest, preSweep))
+            {
+                EliteInjector.ReplaceWorst(population, currentBest, evaluator);
+                trace?.Invoke("Run: coverage-sweep winner injected into population");
+            }
             var sweepMs = sw.ElapsedMilliseconds - sweepStart;
 
             if (evaluator.Compare(currentBest, best) < 0)
