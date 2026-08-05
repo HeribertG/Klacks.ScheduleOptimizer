@@ -12,7 +12,11 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 /// <param name="Batches">Parsed batches in the order returned by the LLM.</param>
 /// <param name="RawResponse">Raw LLM response text for diagnostics on parse failure.</param>
 /// <param name="ParsingError">Null on success; otherwise a short reason why parsing failed.</param>
+/// <param name="LlmSignaledSatisfied">True only when the response carried an explicitly empty
+/// "batches": [] array - the sole valid convergence signal. Batches that were present but all
+/// discarded (empty steps, wrong field names) are a dud iteration, not convergence.</param>
 public sealed record PlanProposalResponse(
     IReadOnlyList<MutationBatch> Batches,
     string RawResponse,
-    string? ParsingError);
+    string? ParsingError,
+    bool LlmSignaledSatisfied = false);

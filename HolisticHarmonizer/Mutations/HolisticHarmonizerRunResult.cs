@@ -21,6 +21,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 /// UI should surface this so the operator can pick a different model.</param>
 /// <param name="LlmRawResponsePreview">First ~600 chars of the last raw LLM response when
 /// parsing failed; null otherwise.</param>
+/// <param name="AbortedOnUnusableResponses">Set when the inner loop stopped because the model produced
+/// several consecutive unusable responses, or because the pre-flight capability check failed.</param>
 public sealed record HolisticHarmonizerRunResult(
     HarmonyBitmap OriginalBitmap,
     HarmonyBitmap FinalBitmap,
@@ -29,4 +31,5 @@ public sealed record HolisticHarmonizerRunResult(
     double FitnessAfter,
     string LlmModelId,
     string? LlmParsingError,
-    string? LlmRawResponsePreview);
+    string? LlmRawResponsePreview,
+    bool AbortedOnUnusableResponses = false);
