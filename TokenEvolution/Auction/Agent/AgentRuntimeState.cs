@@ -61,7 +61,7 @@ public sealed record AgentRuntimeState(
             {
                 continue;
             }
-            var idx = ShiftTypeInference.FromStartTime(TimeOnly.FromDateTime(blocker.StartAt));
+            var idx = ShiftTypeInference.FromSpan(TimeOnly.FromDateTime(blocker.StartAt), TimeOnly.FromDateTime(blocker.EndAt));
             if (!lastWorkedDate.HasValue || blocker.Date > lastWorkedDate.Value)
             {
                 lastWorkedDate = blocker.Date;

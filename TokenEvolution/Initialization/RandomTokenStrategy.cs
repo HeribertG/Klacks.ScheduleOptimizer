@@ -26,7 +26,7 @@ public sealed class RandomTokenStrategy : ITokenPopulationStrategy
 
             var start = ParseTimeOrDefault(slot.StartTime, new TimeOnly(8, 0));
             var end = ParseTimeOrDefault(slot.EndTime, start.AddHours(8));
-            var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
+            var shiftTypeIndex = ShiftTypeInference.FromSpan(start, end);
             var slotHours = (decimal)slot.Hours;
             var slotStartUtc = slotDate.Value.ToDateTime(start);
             var slotEndUtc = end <= start ? slotDate.Value.AddDays(1).ToDateTime(end) : slotDate.Value.ToDateTime(end);

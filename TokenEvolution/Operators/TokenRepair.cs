@@ -194,7 +194,7 @@ public sealed class TokenRepair : ITokenOperator
 
         var start = TimeOnly.TryParse(slot.StartTime, out var parsedStart) ? parsedStart : new TimeOnly(8, 0);
         var end = TimeOnly.TryParse(slot.EndTime, out var parsedEnd) ? parsedEnd : start.AddHours(8);
-        var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
+        var shiftTypeIndex = ShiftTypeInference.FromSpan(start, end);
         var slotHours = (decimal)slot.Hours;
         var slotStartUtc = violation.Date.Value.ToDateTime(start);
         var slotEndUtc = end <= start ? violation.Date.Value.AddDays(1).ToDateTime(end) : violation.Date.Value.ToDateTime(end);

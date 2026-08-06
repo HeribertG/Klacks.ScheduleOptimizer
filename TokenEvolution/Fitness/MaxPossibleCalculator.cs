@@ -59,9 +59,7 @@ public sealed class MaxPossibleCalculator
             return false;
         }
 
-        var shiftTypeIndex = TimeOnly.TryParse(shift.StartTime, out var start)
-            ? ShiftTypeInference.FromStartTime(start)
-            : 0;
+        var shiftTypeIndex = ShiftTypeInference.FromSpanString(shift.StartTime, shift.EndTime);
 
         if (!agent.PerformsShiftWork && shiftTypeIndex != 0)
         {
@@ -119,9 +117,7 @@ public sealed class MaxPossibleCalculator
         {
             return 0;
         }
-        var shiftTypeIndex = TimeOnly.TryParse(shift.StartTime, out var start)
-            ? ShiftTypeInference.FromStartTime(start)
-            : 0;
+        var shiftTypeIndex = ShiftTypeInference.FromSpanString(shift.StartTime, shift.EndTime);
         decimal rate = 0;
         if (shiftTypeIndex == 2) rate += agent.NightRate;
         if (date.DayOfWeek == DayOfWeek.Saturday) rate += agent.WE1Rate;

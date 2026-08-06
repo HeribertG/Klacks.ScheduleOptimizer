@@ -22,13 +22,23 @@ public static class ScenarioScoreSerializer
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public static string Serialize(ObjectiveResult result)
+    public static string Serialize(ObjectiveResult result) => Serialize(result, baselineScalar: null);
+
+    /// <summary>
+    /// Serialises the score snapshot together with the scalar of the plan the run started from. Without
+    /// it a stored candidate says how good it is but not how much better - and the whole point of the
+    /// background optimiser is the delta against the plan already in place.
+    /// </summary>
+    /// <param name="result">Score of the candidate.</param>
+    /// <param name="baselineScalar">Scalar of the starting plan; null when no baseline was scored.</param>
+    public static string Serialize(ObjectiveResult result, double? baselineScalar)
     {
         var snapshot = new
         {
             v = SchemaVersion,
             engine = CompositeEngineTag,
             scalar = result.Scalar,
+            baselineScalar,
             gate = new
             {
                 mandatoryQualMissing = result.Gate.MandatoryQualMissing,

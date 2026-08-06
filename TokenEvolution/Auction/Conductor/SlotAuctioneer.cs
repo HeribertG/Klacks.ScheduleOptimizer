@@ -200,7 +200,7 @@ public sealed class SlotAuctioneer
         var date = DateOnly.Parse(slot.Date);
         var start = TimeOnly.TryParse(slot.StartTime, out var s) ? s : new TimeOnly(8, 0);
         var end = TimeOnly.TryParse(slot.EndTime, out var e) ? e : start.AddHours(8);
-        var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
+        var shiftTypeIndex = ShiftTypeInference.FromSpan(start, end);
         var totalHours = (decimal)slot.Hours;
 
         return new CoreToken(

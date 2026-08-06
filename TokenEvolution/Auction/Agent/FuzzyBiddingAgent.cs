@@ -60,7 +60,7 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
 
         var indexBonus = ResolveIndexBonus(agent, context);
 
-        var slotTypeIndex = ShiftTypeInference.FromStartTimeString(slot.StartTime);
+        var slotTypeIndex = ShiftTypeInference.FromSpanString(slot.StartTime, slot.EndTime);
 
         return new Dictionary<string, double>(StringComparer.Ordinal)
         {

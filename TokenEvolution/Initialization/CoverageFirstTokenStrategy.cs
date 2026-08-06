@@ -48,7 +48,7 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
             var end = TimeOnly.TryParse(slot.EndTime, out var parsedEnd)
                 ? parsedEnd
                 : start.AddHours((double)slot.Hours);
-            var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
+            var shiftTypeIndex = ShiftTypeInference.FromSpan(start, end);
             var slotHours = (decimal)slot.Hours;
             var shiftRefId = Guid.TryParse(slot.Id, out var parsedShift) ? parsedShift : Guid.Empty;
             var slotStartUtc = slotDate.ToDateTime(start);

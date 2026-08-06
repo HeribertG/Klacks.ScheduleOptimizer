@@ -88,8 +88,8 @@ public sealed class WarmStartTokenStrategy : ITokenPopulationStrategy
                     continue;
                 }
 
-                var shiftTypeIndex = ShiftTypeInference.FromStartTime(
-                    TimeOnly.FromDateTime(assignment.StartAt));
+                var shiftTypeIndex = ShiftTypeInference.FromSpan(
+                    TimeOnly.FromDateTime(assignment.StartAt), TimeOnly.FromDateTime(assignment.EndAt));
 
                 if (!SlotConstraintFilter.IsValidAssignment(
                         agent,

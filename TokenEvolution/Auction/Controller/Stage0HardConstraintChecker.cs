@@ -126,7 +126,7 @@ public sealed class Stage0HardConstraintChecker
         }
 
         var start = ParseTimeOrDefault(slot.StartTime, new TimeOnly(8, 0));
-        var shiftTypeIndex = ShiftTypeInference.FromStartTime(start);
+        var shiftTypeIndex = ShiftTypeInference.FromSpanString(slot.StartTime, slot.EndTime);
         var slotHours = (decimal)slot.Hours;
 
         if (ExceedsMaxConsecutiveDays(agent, date.Value, alreadyAssigned, context, out var runLength, out var hardCap))
