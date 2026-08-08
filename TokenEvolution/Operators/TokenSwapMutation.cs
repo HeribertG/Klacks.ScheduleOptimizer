@@ -2,14 +2,18 @@
 
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
+using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 
 /// <summary>
 /// M1: Swaps the agent assignment of two non-locked tokens in the scenario.
 /// Locked tokens are never mutated. After the swap, both modified tokens are re-checked
-/// against Stage 0 — if either would violate a hard constraint, the mutation is rolled back
-/// and the parent scenario is returned unmodified.
+/// against Stage 0 AND against <see cref="SlotConstraintFilter"/> — if either would violate a
+/// hard constraint, the mutation is rolled back and the parent scenario is returned unmodified.
+/// Stage 0 alone only knows the MaxConsecutiveDays hard cap, so a swap could grow a work block
+/// past the MaxWorkDays block length and below the MinRestDays free block that seeding, repair
+/// and reassign already enforce through the filter.
 /// </summary>
 /// <param name="stage0">Hard-constraint checker used to veto swaps that introduce violations.</param>
 public sealed class TokenSwapMutation : ITokenOperator
@@ -80,7 +84,7 @@ public sealed class TokenSwapMutation : ITokenOperator
         tokens[firstIdx] = swappedA;
         tokens[secondIdx] = swappedB;
 
-        if (ViolatesStage0(swappedA, swappedB, tokens, context.Wizard))
+        if (ViolatesHardConstraints(swappedA, swappedB, tokens, agentsById, context.Wizard))
         {
             return CloneScenario(context.Primary, context.Primary.Tokens.ToList());
         }
@@ -88,10 +92,11 @@ public sealed class TokenSwapMutation : ITokenOperator
         return CloneScenario(context.Primary, tokens);
     }
 
-    private bool ViolatesStage0(
+    private bool ViolatesHardConstraints(
         CoreToken first,
         CoreToken second,
         IReadOnlyList<CoreToken> allTokens,
+        IReadOnlyDictionary<string, CoreAgent> agentsById,
         CoreWizardContext wizard)
     {
         var othersForFirst = new List<CoreToken>(allTokens.Count - 1);
@@ -109,17 +114,36 @@ public sealed class TokenSwapMutation : ITokenOperator
             }
         }
 
-        if (_stage0.ValidateToken(first, othersForFirst, wizard) != null)
+        return IsRejected(first, othersForFirst, agentsById, wizard)
+            || IsRejected(second, othersForSecond, agentsById, wizard);
+    }
+
+    private bool IsRejected(
+        CoreToken token,
+        IReadOnlyList<CoreToken> others,
+        IReadOnlyDictionary<string, CoreAgent> agentsById,
+        CoreWizardContext wizard)
+    {
+        if (_stage0.ValidateToken(token, others, wizard) != null)
         {
             return true;
         }
 
-        if (_stage0.ValidateToken(second, othersForSecond, wizard) != null)
+        if (!agentsById.TryGetValue(token.AgentId, out var agent))
         {
             return true;
         }
 
-        return false;
+        return !SlotConstraintFilter.IsValidAssignment(
+            agent,
+            token.Date,
+            token.ShiftTypeIndex,
+            token.ShiftRefId,
+            token.TotalHours,
+            wizard,
+            others,
+            token.StartAt,
+            token.EndAt);
     }
 
     internal static CoreScenario CloneScenario(CoreScenario source, List<CoreToken> tokens)

@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
@@ -27,6 +28,7 @@ public sealed class TokenPopulationBuilder
     private readonly ITokenPopulationStrategy _greedy;
     private readonly ITokenPopulationStrategy _random;
     private readonly ITokenPopulationStrategy _warmStart;
+    private readonly TopDownHandover _handover = new();
 
     public TokenPopulationBuilder(
         ITokenPopulationStrategy auction,
@@ -113,7 +115,33 @@ public sealed class TokenPopulationBuilder
         }
         trace?.Invoke($"BuildPopulation: random {randomCount} scenarios in {sw.ElapsedMilliseconds - t0}ms");
 
+        t0 = sw.ElapsedMilliseconds;
+        ServeGuaranteedHoursTopDown(result, context, cancellationToken);
+        trace?.Invoke($"BuildPopulation: top-down handover over {result.Count} scenarios in {sw.ElapsedMilliseconds - t0}ms");
+
         return result;
+    }
+
+    /// <summary>
+    /// Serves the guaranteed hours top-down (rule 5) in every seeded plan. None of the five strategies
+    /// builds that distribution: the auction awards by bid score, coverage-first by the largest
+    /// remaining target — both of which balance the load instead of filling the roster from the top —
+    /// and the one strategy that does fill top-down, greedy, force-assigns its leftover slots and is
+    /// eliminated on the hard stage. Rewriting the owners afterwards keeps each strategy's own block
+    /// geometry, which is what carries the 5/2 structure, and makes the whole start population a
+    /// top-down one instead of leaving the rule to a single elite.
+    /// </summary>
+    /// <param name="population">Scenarios built by the strategies; entries are replaced in place</param>
+    /// <param name="context">Wizard context supplying the roster order and the rules</param>
+    /// <param name="cancellationToken">Cancellation of the surrounding build</param>
+    private void ServeGuaranteedHoursTopDown(
+        List<CoreScenario> population, CoreWizardContext context, CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < population.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            population[i] = _handover.Apply(population[i], context);
+        }
     }
 
     private static void AddDeterministicStrategy(

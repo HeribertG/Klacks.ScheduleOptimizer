@@ -2,13 +2,17 @@
 
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
+using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 
 /// <summary>
 /// C1: 1-point block crossover. Takes the first k blocks (ordered by AgentId, FirstDate) from parent A
 /// and appends the blocks from parent B that do not collide on the same (agent, date, shift) triple,
-/// fill an already-taken (date, shift) slot, or trigger a Stage-0 hard-constraint veto when added.
+/// fill an already-taken (date, shift) slot, or trigger a Stage-0 or <see cref="SlotConstraintFilter"/>
+/// hard-constraint veto when added. Stage 0 alone only knows the MaxConsecutiveDays hard cap, so an
+/// appended block could grow a work block past the MaxWorkDays block length and below the MinRestDays
+/// free block that seeding, repair and reassign already enforce through the filter.
 /// Locked tokens appear exactly once regardless of source.
 /// </summary>
 /// <param name="stage0">Hard-constraint checker used to filter parent-B blocks that would
@@ -33,6 +37,11 @@ public sealed class BlockCrossover : ITokenOperator
         var parentB = context.Secondary ?? context.Primary;
 
         var slotCapacity = BuildSlotCapacity(context.Wizard);
+        var agentsById = new Dictionary<string, CoreAgent>(StringComparer.Ordinal);
+        foreach (var agent in context.Wizard.Agents)
+        {
+            agentsById[agent.Id] = agent;
+        }
 
         var blocksA = parentA.Tokens
             .GroupBy(t => t.BlockId)
@@ -73,7 +82,7 @@ public sealed class BlockCrossover : ITokenOperator
                 continue;
             }
 
-            if (BlockViolatesStage0(block.Tokens, result, context.Wizard))
+            if (BlockViolatesHardConstraints(block.Tokens, result, agentsById, context.Wizard))
             {
                 continue;
             }
@@ -88,9 +97,10 @@ public sealed class BlockCrossover : ITokenOperator
         return TokenSwapMutation.CloneScenario(parentA, result);
     }
 
-    private bool BlockViolatesStage0(
+    private bool BlockViolatesHardConstraints(
         IReadOnlyList<CoreToken> blockTokens,
         IReadOnlyList<CoreToken> resultSoFar,
+        IReadOnlyDictionary<string, CoreAgent> agentsById,
         CoreWizardContext wizard)
     {
         var combined = new List<CoreToken>(resultSoFar.Count + blockTokens.Count);
@@ -115,6 +125,25 @@ public sealed class BlockCrossover : ITokenOperator
             }
 
             if (_stage0.ValidateToken(token, others, wizard) != null)
+            {
+                return true;
+            }
+
+            if (!agentsById.TryGetValue(token.AgentId, out var agent))
+            {
+                return true;
+            }
+
+            if (!SlotConstraintFilter.IsValidAssignment(
+                agent,
+                token.Date,
+                token.ShiftTypeIndex,
+                token.ShiftRefId,
+                token.TotalHours,
+                wizard,
+                others,
+                token.StartAt,
+                token.EndAt))
             {
                 return true;
             }

@@ -28,6 +28,7 @@ public sealed class TokenEvolutionLoop
     private readonly BlockMergeMutation _merge;
     private readonly ReassignMutation _reassign;
     private readonly TokenRepair _repair;
+    private readonly TopDownHandover _handover = new();
 
     public TokenEvolutionLoop(
         TokenPopulationBuilder populationBuilder,
@@ -95,6 +96,11 @@ public sealed class TokenEvolutionLoop
         var best = SelectBest(population, evaluator);
         var generationsNoImprovement = 0;
 
+        // The handover pass is deterministic, so running it twice on the same plan can only repeat
+        // its own result. Elitism carries the same instance across generations; remembering which
+        // plans were already offered keeps the pass off the hot path once the best plan is served.
+        var handoverSeen = new HashSet<string>(StringComparer.Ordinal);
+
         for (var generation = 1; generation <= config.MaxGenerations; generation++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -139,6 +145,7 @@ public sealed class TokenEvolutionLoop
             var sweepStart = sw.ElapsedMilliseconds;
             var preSweep = currentBest;
             currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
+            currentBest = RunTopDownHandover(currentBest, context, evaluator, handoverSeen, trace);
             if (!ReferenceEquals(currentBest, preSweep))
             {
                 EliteInjector.ReplaceWorst(population, currentBest, evaluator);
@@ -310,6 +317,45 @@ public sealed class TokenEvolutionLoop
             Fitness = source.Fitness,
             HardViolations = source.HardViolations,
         };
+    }
+
+    /// <summary>
+    /// Serves the guaranteed hours of the roster top-down on the current best plan (rule 5: the upper
+    /// ranks are filled first, the last ones eat what remains). The pass rewrites owners only, so it
+    /// cannot change coverage; it is still accepted only when it wins the lexicographic stage
+    /// comparison, which keeps a plan that trades a hard or a higher-ranked stage away out of the run.
+    /// </summary>
+    /// <param name="scenario">Current best plan of the generation</param>
+    /// <param name="context">Wizard context supplying the roster order and the rules</param>
+    /// <param name="evaluator">Stage evaluator deciding whether the rebalanced plan is kept</param>
+    /// <param name="alreadyOffered">Plans the pass has already seen; a deterministic pass repeated on the same plan cannot find anything new</param>
+    /// <param name="trace">Optional trace sink</param>
+    private CoreScenario RunTopDownHandover(
+        CoreScenario scenario,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator,
+        HashSet<string> alreadyOffered,
+        Action<string>? trace = null)
+    {
+        if (!alreadyOffered.Add(scenario.Id))
+        {
+            return scenario;
+        }
+
+        var rebalanced = _handover.Apply(scenario, context);
+        if (ReferenceEquals(rebalanced, scenario))
+        {
+            return scenario;
+        }
+
+        evaluator.Evaluate(rebalanced, context);
+        if (evaluator.Compare(rebalanced, scenario) >= 0)
+        {
+            return scenario;
+        }
+
+        trace?.Invoke($"Run: top-down handover accepted (stage1={rebalanced.FitnessStage1:F4}, stage2={rebalanced.FitnessStage2:F4})");
+        return rebalanced;
     }
 
     private CoreScenario RunCoverageSweep(
