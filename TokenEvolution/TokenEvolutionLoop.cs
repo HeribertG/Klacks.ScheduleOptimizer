@@ -29,6 +29,7 @@ public sealed class TokenEvolutionLoop
     private readonly ReassignMutation _reassign;
     private readonly TokenRepair _repair;
     private readonly TopDownHandover _handover = new();
+    private readonly ShiftKindBalancer _kindBalancer = new();
 
     public TokenEvolutionLoop(
         TokenPopulationBuilder populationBuilder,
@@ -100,6 +101,7 @@ public sealed class TokenEvolutionLoop
         // its own result. Elitism carries the same instance across generations; remembering which
         // plans were already offered keeps the pass off the hot path once the best plan is served.
         var handoverSeen = new HashSet<string>(StringComparer.Ordinal);
+        var balanceSeen = new HashSet<string>(StringComparer.Ordinal);
 
         for (var generation = 1; generation <= config.MaxGenerations; generation++)
         {
@@ -146,6 +148,11 @@ public sealed class TokenEvolutionLoop
             var preSweep = currentBest;
             currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
             currentBest = RunTopDownHandover(currentBest, context, evaluator, handoverSeen, trace);
+            currentBest = RunShiftKindBalance(currentBest, context, evaluator, balanceSeen, trace);
+
+            // The handover and balance passes reshape blocks, which can open a legal fill for a slot
+            // the first sweep had to skip — one more sweep catches it in the same generation.
+            currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
             if (!ReferenceEquals(currentBest, preSweep))
             {
                 EliteInjector.ReplaceWorst(population, currentBest, evaluator);
@@ -356,6 +363,28 @@ public sealed class TokenEvolutionLoop
 
         trace?.Invoke($"Run: top-down handover accepted (stage1={rebalanced.FitnessStage1:F4}, stage2={rebalanced.FitnessStage2:F4})");
         return rebalanced;
+    }
+
+    private CoreScenario RunShiftKindBalance(
+        CoreScenario scenario,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator,
+        HashSet<string> alreadyOffered,
+        Action<string>? trace = null)
+    {
+        if (!alreadyOffered.Add(scenario.Id))
+        {
+            return scenario;
+        }
+
+        var balanced = _kindBalancer.Apply(scenario, context, evaluator);
+        if (ReferenceEquals(balanced, scenario))
+        {
+            return scenario;
+        }
+
+        trace?.Invoke($"Run: shift-kind balance accepted (stage4={balanced.FitnessStage4:F4})");
+        return balanced;
     }
 
     private CoreScenario RunCoverageSweep(

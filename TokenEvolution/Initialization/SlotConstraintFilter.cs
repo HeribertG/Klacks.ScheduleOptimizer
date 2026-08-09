@@ -17,6 +17,10 @@ public static class SlotConstraintFilter
     /// per-agent MaximumHours, per-day MaxDailyHours (contract override or per-agent cap),
     /// per-agent MinPauseHours (incl. cross-day overnight gaps), block-length and rest-day rules.
     /// The optional slot interval enables the MinPauseHours check; pass null for keyword-only seeds.
+    /// With <paramref name="relaxSoftRules"/> the two soft structure rules — the MaxWorkDays block
+    /// ideal and MinRestDays — step aside while every hard rule stays: coverage outranks the package
+    /// ideal, so a slot no strictly-valid agent can take may still be filled legally. Mirrors the
+    /// round-2 relaxation of the auction.
     /// </summary>
     public static bool IsValidAssignment(
         CoreAgent agent,
@@ -27,7 +31,8 @@ public static class SlotConstraintFilter
         CoreWizardContext context,
         IReadOnlyList<CoreToken> alreadyAssigned,
         DateTime? slotStartUtc = null,
-        DateTime? slotEndUtc = null)
+        DateTime? slotEndUtc = null,
+        bool relaxSoftRules = false)
     {
         // Qualification gating is a hard prerequisite and an O(1) lookup, so it runs first: an agent
         // lacking a mandatory qualification of the shift may never receive it (empty set = no-op).
@@ -76,12 +81,12 @@ public static class SlotConstraintFilter
             return false;
         }
 
-        if (ExceedsBlockLength(agent, date, context, alreadyAssigned))
+        if (ExceedsBlockLength(agent, date, context, alreadyAssigned, applySoftCap: !relaxSoftRules))
         {
             return false;
         }
 
-        if (ViolatesMinRestDays(agent, date, alreadyAssigned, context))
+        if (!relaxSoftRules && ViolatesMinRestDays(agent, date, alreadyAssigned, context))
         {
             return false;
         }
@@ -301,9 +306,10 @@ public static class SlotConstraintFilter
         CoreAgent agent,
         DateOnly date,
         CoreWizardContext context,
-        IReadOnlyList<CoreToken> assigned)
+        IReadOnlyList<CoreToken> assigned,
+        bool applySoftCap = true)
     {
-        var softCap = agent.MaxWorkDays > 0 ? agent.MaxWorkDays : 0;
+        var softCap = applySoftCap && agent.MaxWorkDays > 0 ? agent.MaxWorkDays : 0;
         var hardCap = agent.MaxConsecutiveDays > 0
             ? agent.MaxConsecutiveDays
             : context.SchedulingMaxConsecutiveDays;

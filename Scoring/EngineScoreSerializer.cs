@@ -82,6 +82,7 @@ public static class EngineScoreSerializer
                 fairness = result.Stage4Components.Fairness,
                 minimumHours = result.Stage4Components.MinimumHours,
                 blockSymmetry = result.Stage4Components.BlockSymmetry,
+                shiftKindFairness = result.Stage4Components.ShiftKindFairness,
             },
             context = new
             {

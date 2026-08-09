@@ -9,7 +9,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 /// <param name="Fairness">Evenness of the target-hours coverage ratio across agents</param>
 /// <param name="MinimumHours">Weighted coverage of each agent's contractual minimum hours</param>
 /// <param name="BlockSymmetry">Uniformity of consecutive-day block lengths</param>
+/// <param name="ShiftKindFairness">Evenness of each shift kind's count per eligible day across the agents allowed to hold it</param>
 public sealed record Stage4Components(
     double Fairness,
     double MinimumHours,
-    double BlockSymmetry);
+    double BlockSymmetry,
+    double ShiftKindFairness);

@@ -21,6 +21,13 @@ public class CoreScenario
     /// <summary>Stage 0: hard-constraint violations (count, must minimize to 0).</summary>
     public int FitnessStage0 { get; set; }
 
+    /// <summary>
+    /// Legality subset of Stage 0: every hard violation except UnderSupply. Compared before the
+    /// full Stage-0 count so that an unstaffed slot can never be bought by breaking a work rule —
+    /// a plan stays legal first, covered second.
+    /// </summary>
+    public int FitnessStage0Legality { get; set; }
+
     /// <summary>Stage 1: GuaranteedHours coverage top-down (0..1, higher is better).</summary>
     public double FitnessStage1 { get; set; }
 

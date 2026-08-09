@@ -212,7 +212,32 @@ public sealed class TokenRepair : ITokenOperator
 
         if (candidates.Count == 0)
         {
-            return false;
+            if (TryRelocateAndFill(
+                    primary, wizard, violation.ShiftRefId.Value, violation.Date.Value,
+                    shiftTypeIndex, slotHours, slotStartUtc, slotEndUtc, occupiedAgents,
+                    relaxSoftRules: false, out repaired))
+            {
+                return true;
+            }
+
+            // Coverage outranks the soft package rules: when neither a strict fill nor a one-move
+            // relocation exists, retry with MaxWorkDays/MinRestDays relaxed — every hard rule
+            // (bans, rest hours, consecutive-days cap, collisions) still gates the candidate. The
+            // relaxed one-move relocation is the last resort of the escalation.
+            candidates = wizard.Agents
+                .Where(agent => !occupiedAgents.Contains(agent.Id)
+                    && SlotConstraintFilter.IsValidAssignment(
+                        agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours,
+                        wizard, primary.Tokens, slotStartUtc, slotEndUtc, relaxSoftRules: true))
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                return TryRelocateAndFill(
+                    primary, wizard, violation.ShiftRefId.Value, violation.Date.Value,
+                    shiftTypeIndex, slotHours, slotStartUtc, slotEndUtc, occupiedAgents,
+                    relaxSoftRules: true, out repaired);
+            }
         }
 
         var chosen = RosterPositionBias.PickAccuracyAware(candidates, primary.Tokens, wizard.Agents, rng);
@@ -236,6 +261,274 @@ public sealed class TokenRepair : ITokenOperator
 
         repaired = TokenSwapMutation.CloneScenario(primary, tokens);
         return true;
+    }
+
+    /// <summary>
+    /// One-move escape for a slot no agent can take directly: an agent that fails only because of one
+    /// of its own neighbouring shifts hands that shift to another agent and then takes the open slot.
+    /// Deterministic and random-free — agents in roster order, blocker candidates are the outer edge
+    /// days of the runs adjacent to the slot (removing an edge never splits a block), receivers are
+    /// picked accuracy-aware (below guaranteed hours top-down first, surplus bottom-up second). The
+    /// reach is deliberately one move; a blocker in the middle of a run stays where it is.
+    /// </summary>
+    private static bool TryRelocateAndFill(
+        CoreScenario primary,
+        CoreWizardContext wizard,
+        Guid shiftRefId,
+        DateOnly slotDate,
+        int shiftTypeIndex,
+        decimal slotHours,
+        DateTime slotStartUtc,
+        DateTime slotEndUtc,
+        IReadOnlySet<string> occupiedAgents,
+        bool relaxSoftRules,
+        out CoreScenario repaired)
+    {
+        repaired = primary;
+
+        foreach (var agent in wizard.Agents)
+        {
+            if (occupiedAgents.Contains(agent.Id))
+            {
+                continue;
+            }
+
+            var ownDays = new HashSet<DateOnly>();
+            foreach (var token in primary.Tokens)
+            {
+                if (string.Equals(token.AgentId, agent.Id, StringComparison.Ordinal))
+                {
+                    ownDays.Add(token.Date);
+                }
+            }
+
+            var blockers = EdgeBlockers(primary.Tokens, agent.Id, ownDays, slotDate, agent.MinRestDays);
+
+            foreach (var blocker in blockers)
+            {
+                if (TryMoveBlockersAndFill(
+                        primary, wizard, agent, [blocker], slotDate, shiftTypeIndex, shiftRefId,
+                        slotHours, slotStartUtc, slotEndUtc, relaxSoftRules, out repaired))
+                {
+                    return true;
+                }
+            }
+
+            if (!relaxSoftRules)
+            {
+                continue;
+            }
+
+            // Depth-2 cascade, last escalation only: a slot can be walled in by TWO own shifts at
+            // once (a collision on the slot day plus a rest-hour neighbour), which no single move
+            // resolves. Both blockers hand over, then the slot is taken.
+            for (var i = 0; i < blockers.Count; i++)
+            {
+                for (var j = i + 1; j < blockers.Count; j++)
+                {
+                    if (TryMoveBlockersAndFill(
+                            primary, wizard, agent, [blockers[i], blockers[j]], slotDate, shiftTypeIndex,
+                            shiftRefId, slotHours, slotStartUtc, slotEndUtc, relaxSoftRules, out repaired))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Removes the given blockers of one agent, verifies the agent may then take the slot, finds a
+    /// receiver for every removed blocker on the growing swapped state and builds the repaired plan —
+    /// or returns false without side effects when any step has no legal answer.
+    /// </summary>
+    private static bool TryMoveBlockersAndFill(
+        CoreScenario primary,
+        CoreWizardContext wizard,
+        CoreAgent agent,
+        IReadOnlyList<CoreToken> blockers,
+        DateOnly slotDate,
+        int shiftTypeIndex,
+        Guid shiftRefId,
+        decimal slotHours,
+        DateTime slotStartUtc,
+        DateTime slotEndUtc,
+        bool relaxSoftRules,
+        out CoreScenario repaired)
+    {
+        repaired = primary;
+        var removed = new HashSet<CoreToken>(blockers);
+        var working = primary.Tokens.Where(t => !removed.Contains(t)).ToList();
+
+        if (!SlotConstraintFilter.IsValidAssignment(
+                agent, slotDate, shiftTypeIndex, shiftRefId, slotHours,
+                wizard, working, slotStartUtc, slotEndUtc, relaxSoftRules))
+        {
+            return false;
+        }
+
+        foreach (var blocker in blockers)
+        {
+            var receiver = FindRelocationReceiver(agent, blocker, working, wizard, relaxSoftRules);
+            if (receiver is null)
+            {
+                return false;
+            }
+
+            working.Add(blocker with
+            {
+                AgentId = receiver.Id,
+                Surcharges = SurchargeEstimator.Estimate(
+                    blocker.TotalHours, blocker.ShiftTypeIndex, blocker.Date, receiver),
+            });
+        }
+
+        working.Add(new CoreToken(
+            WorkIds: [],
+            ShiftTypeIndex: shiftTypeIndex,
+            Date: slotDate,
+            TotalHours: slotHours,
+            StartAt: slotStartUtc,
+            EndAt: slotEndUtc,
+            BlockId: Guid.NewGuid(),
+            PositionInBlock: 0,
+            IsLocked: false,
+            LocationContext: null,
+            ShiftRefId: shiftRefId,
+            AgentId: agent.Id)
+        {
+            Surcharges = SurchargeEstimator.Estimate(slotHours, shiftTypeIndex, slotDate, agent),
+        });
+
+        repaired = TokenSwapMutation.CloneScenario(primary, working);
+        return true;
+    }
+
+    /// <summary>
+    /// The agent's own removable tokens whose removal can free the slot day: any own shift on the
+    /// slot day itself (a collision or rest-hour conflict with the slot; the fill keeps the day
+    /// occupied, so the run never splits), the outer edge days of the runs directly adjacent to the
+    /// slot, and the slot-facing edge days of runs within the MinRestDays window — those are the
+    /// shifts whose rest-day gap vetoes the slot even across a free day. Removing an edge never
+    /// splits a block. Ordered by date then start for a stable walk.
+    /// </summary>
+    private static List<CoreToken> EdgeBlockers(
+        IReadOnlyList<CoreToken> tokens, string agentId, HashSet<DateOnly> ownDays, DateOnly slotDate, int minRestDays)
+    {
+        var edgeDays = new HashSet<DateOnly> { slotDate };
+        var reach = Math.Max(1, minRestDays);
+
+        for (var offset = 1; offset <= reach; offset++)
+        {
+            var before = slotDate.AddDays(-offset);
+            if (ownDays.Contains(before))
+            {
+                var probe = before;
+                while (ownDays.Contains(probe.AddDays(-1)))
+                {
+                    probe = probe.AddDays(-1);
+                }
+
+                edgeDays.Add(probe);
+                edgeDays.Add(before);
+                break;
+            }
+        }
+
+        for (var offset = 1; offset <= reach; offset++)
+        {
+            var after = slotDate.AddDays(offset);
+            if (ownDays.Contains(after))
+            {
+                var probe = after;
+                while (ownDays.Contains(probe.AddDays(1)))
+                {
+                    probe = probe.AddDays(1);
+                }
+
+                edgeDays.Add(probe);
+                edgeDays.Add(after);
+                break;
+            }
+        }
+
+        var blockers = new List<CoreToken>();
+        foreach (var token in tokens)
+        {
+            if (!token.IsLocked
+                && string.Equals(token.AgentId, agentId, StringComparison.Ordinal)
+                && edgeDays.Contains(token.Date)
+                && (token.Date == slotDate || IsRunEdge(ownDays, token.Date)))
+            {
+                blockers.Add(token);
+            }
+        }
+
+        blockers.Sort((a, b) => a.Date != b.Date
+            ? a.Date.CompareTo(b.Date)
+            : a.StartAt.CompareTo(b.StartAt));
+        return blockers;
+    }
+
+    private static bool IsRunEdge(HashSet<DateOnly> ownDays, DateOnly date)
+        => !ownDays.Contains(date.AddDays(-1)) || !ownDays.Contains(date.AddDays(1));
+
+    /// <summary>
+    /// Deterministic receiver for a relocated shift: agents below their guaranteed hours in roster
+    /// order first (top-down service), then the rest in reverse roster order (surplus flows to the
+    /// bottom), each gated by the full assignment filter on the given plan state — the state grows
+    /// while a multi-blocker cascade re-owns one shift after the other.
+    /// </summary>
+    private static CoreAgent? FindRelocationReceiver(
+        CoreAgent donor,
+        CoreToken blocker,
+        IReadOnlyList<CoreToken> stateTokens,
+        CoreWizardContext wizard,
+        bool relaxSoftRules)
+    {
+        var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var token in stateTokens)
+        {
+            hoursByAgent[token.AgentId] = hoursByAgent.GetValueOrDefault(token.AgentId, 0)
+                + (double)(token.TotalHours + token.Surcharges);
+        }
+
+        var below = new List<CoreAgent>();
+        var surplus = new List<CoreAgent>();
+        foreach (var candidate in wizard.Agents)
+        {
+            if (string.Equals(candidate.Id, donor.Id, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var planned = candidate.CurrentHours + hoursByAgent.GetValueOrDefault(candidate.Id, 0);
+            if (candidate.GuaranteedHours > 0 && planned < candidate.GuaranteedHours)
+            {
+                below.Add(candidate);
+            }
+            else
+            {
+                surplus.Add(candidate);
+            }
+        }
+
+        surplus.Reverse();
+
+        foreach (var candidate in below.Concat(surplus))
+        {
+            if (SlotConstraintFilter.IsValidAssignment(
+                    candidate, blocker.Date, blocker.ShiftTypeIndex, blocker.ShiftRefId,
+                    blocker.TotalHours, wizard, stateTokens, blocker.StartAt, blocker.EndAt,
+                    relaxSoftRules))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static CoreScenario RepairOverSupply(TokenOperatorContext context, ConstraintViolation violation)

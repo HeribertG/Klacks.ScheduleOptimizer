@@ -1,8 +1,10 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
+using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
 using Klacks.ScheduleOptimizer.TokenEvolution;
+using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 
@@ -17,6 +19,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     private readonly TokenConstraintChecker _constraintChecker;
     private readonly IReadOnlyDictionary<string, double> _maxPossiblePerAgent;
     private readonly IReadOnlyList<string> _agentsInPriorityOrder;
+    private readonly object _kindEligibilityLock = new();
+    private CoreWizardContext? _kindEligibilityContext;
+    private IReadOnlyDictionary<int, IReadOnlyDictionary<string, int>>? _kindEligibleDays;
 
     /// <summary>Stage-1 roster-rank decay: weights WHO reaches the guaranteed hours top-down. 1.0 = index-blind count (legacy), lower = top-roster satisfaction dominates. Autoresearch-trainable.</summary>
     public double Stage1RankDecay { get; init; } = 0.85;
@@ -69,7 +74,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
 
     public void Evaluate(CoreScenario scenario, CoreWizardContext context)
     {
-        scenario.FitnessStage0 = _constraintChecker.CountViolations(scenario, context);
+        var (legality, total) = _constraintChecker.CountViolationsSplit(scenario, context);
+        scenario.FitnessStage0Legality = legality;
+        scenario.FitnessStage0 = total;
         var (stage1Flags, stage1Completion) = ComputeStage1(scenario, context);
         scenario.FitnessStage1 = stage1Completion;
         scenario.FitnessStage2 = ComputeStage2(scenario, context);
@@ -104,7 +111,8 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var stage4 = new Stage4Components(
             Fairness: ComputeFairnessScore(scenario, context),
             MinimumHours: ComputeMinimumHoursScore(scenario, context),
-            BlockSymmetry: ComputeBlockSymmetryScore(scenario));
+            BlockSymmetry: ComputeBlockSymmetryScore(scenario),
+            ShiftKindFairness: ComputeShiftKindFairnessScore(scenario, context));
 
         return new DetailedFitnessResult(
             Stage0: scenario.FitnessStage0,
@@ -131,6 +139,12 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         if (y is null)
         {
             return -1;
+        }
+
+        var legality = x.FitnessStage0Legality.CompareTo(y.FitnessStage0Legality);
+        if (legality != 0)
+        {
+            return legality;
         }
 
         var stage0 = x.FitnessStage0.CompareTo(y.FitnessStage0);
@@ -471,8 +485,123 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var fairness = ComputeFairnessScore(scenario, context);
         var minimum = ComputeMinimumHoursScore(scenario, context);
         var symmetry = ComputeBlockSymmetryScore(scenario);
+        var kindFairness = ComputeShiftKindFairnessScore(scenario, context);
 
-        return (fairness + minimum + symmetry) / 3.0;
+        return (fairness + minimum + symmetry + kindFairness) / 4.0;
+    }
+
+    /// <summary>
+    /// Evenness of each shift kind's distribution over the agents that may hold it at all: an agent's
+    /// share is its token count of the kind divided by its eligible days (days with at least one
+    /// non-banned slot of that kind), so an agent barred from nights never dilutes the night cohort
+    /// and a part-time eligibility is weighted, not compared absolutely. Per kind the score is
+    /// 1 - min(1, stddev of the shares); the result is the mean over the kinds that exist.
+    /// </summary>
+    internal double ComputeShiftKindFairnessScore(CoreScenario scenario, CoreWizardContext context)
+    {
+        var eligibleDaysByKind = GetKindEligibility(context);
+        if (eligibleDaysByKind.Count == 0)
+        {
+            return 1;
+        }
+
+        var countsByKindAndAgent = new Dictionary<(int Kind, string AgentId), int>();
+        foreach (var token in scenario.Tokens)
+        {
+            var key = (token.ShiftTypeIndex, token.AgentId);
+            countsByKindAndAgent[key] = countsByKindAndAgent.GetValueOrDefault(key, 0) + 1;
+        }
+
+        double scoreSum = 0;
+        var kinds = 0;
+        foreach (var (kind, eligibleByAgent) in eligibleDaysByKind)
+        {
+            var shares = new List<double>();
+            foreach (var (agentId, eligibleDays) in eligibleByAgent)
+            {
+                if (eligibleDays > 0)
+                {
+                    shares.Add(countsByKindAndAgent.GetValueOrDefault((kind, agentId), 0) / (double)eligibleDays);
+                }
+            }
+
+            if (shares.Count < 2)
+            {
+                continue;
+            }
+
+            var mean = shares.Average();
+            var variance = shares.Sum(s => Math.Pow(s - mean, 2)) / shares.Count;
+            scoreSum += 1.0 - Math.Min(1, Math.Sqrt(variance));
+            kinds++;
+        }
+
+        return kinds == 0 ? 1 : scoreSum / kinds;
+    }
+
+    /// <summary>
+    /// Eligible days per shift kind and agent, derived once per wizard context from the slot index and
+    /// the ban list and cached by reference — Evaluate runs in parallel over one context, so the lazy
+    /// initialisation is locked.
+    /// </summary>
+    private IReadOnlyDictionary<int, IReadOnlyDictionary<string, int>> GetKindEligibility(CoreWizardContext context)
+    {
+        lock (_kindEligibilityLock)
+        {
+            if (ReferenceEquals(_kindEligibilityContext, context) && _kindEligibleDays is not null)
+            {
+                return _kindEligibleDays;
+            }
+
+            var daysByKindAndAgent = new Dictionary<int, Dictionary<string, HashSet<DateOnly>>>();
+            foreach (var ((shiftRefId, date), slot) in EvaluationContext.For(context).SlotsByKey)
+            {
+                if (!TimeOnly.TryParse(slot.StartTime, out var start)
+                    || !TimeOnly.TryParse(slot.EndTime, out var end))
+                {
+                    continue;
+                }
+
+                var kind = ShiftTypeInference.FromSpan(start, end);
+                if (!daysByKindAndAgent.TryGetValue(kind, out var byAgent))
+                {
+                    byAgent = new Dictionary<string, HashSet<DateOnly>>(StringComparer.Ordinal);
+                    daysByKindAndAgent[kind] = byAgent;
+                }
+
+                foreach (var agent in context.Agents)
+                {
+                    if (!context.IsEligible(agent.Id, shiftRefId, date))
+                    {
+                        continue;
+                    }
+
+                    if (!byAgent.TryGetValue(agent.Id, out var days))
+                    {
+                        days = [];
+                        byAgent[agent.Id] = days;
+                    }
+
+                    days.Add(date);
+                }
+            }
+
+            var result = new Dictionary<int, IReadOnlyDictionary<string, int>>();
+            foreach (var (kind, byAgent) in daysByKindAndAgent)
+            {
+                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var agent in context.Agents)
+                {
+                    counts[agent.Id] = byAgent.TryGetValue(agent.Id, out var days) ? days.Count : 0;
+                }
+
+                result[kind] = counts;
+            }
+
+            _kindEligibilityContext = context;
+            _kindEligibleDays = result;
+            return result;
+        }
     }
 
     private double ComputeFairnessScore(CoreScenario scenario, CoreWizardContext context)
