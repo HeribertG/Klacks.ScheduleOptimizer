@@ -22,6 +22,10 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     private readonly object _kindEligibilityLock = new();
     private CoreWizardContext? _kindEligibilityContext;
     private IReadOnlyDictionary<int, IReadOnlyDictionary<string, int>>? _kindEligibleDays;
+    private readonly object _carryInLock = new();
+    private CoreWizardContext? _carryInContext;
+    private DateOnly _carryInAnchor;
+    private IReadOnlyList<CarryInPackage>? _carryInPackages;
 
     /// <summary>Stage-1 roster-rank decay: weights WHO reaches the guaranteed hours top-down. 1.0 = index-blind count (legacy), lower = top-roster satisfaction dominates. Autoresearch-trainable.</summary>
     public double Stage1RankDecay { get; init; } = 0.85;
@@ -40,6 +44,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
 
     /// <summary>Stage-3 max-optimal-gap weight.</summary>
     public double Stage3MaxGapWeight { get; init; } = 0.1;
+
+    /// <summary>Stage-3 weight for holding the carried-in packages that are still open at the period start.</summary>
+    public double Stage3CarryInWeight { get; init; } = 0.2;
 
     public TokenFitnessEvaluator(
         TokenConstraintChecker constraintChecker,
@@ -69,6 +76,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Stage3BlacklistWeight = cfg.FitnessStage3Blacklist,
             Stage3LocationWeight = cfg.FitnessStage3Location,
             Stage3MaxGapWeight = cfg.FitnessStage3MaxGap,
+            Stage3CarryInWeight = cfg.FitnessStage3CarryIn,
         };
     }
 
@@ -327,7 +335,14 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var location = ComputeLocationContinuityScore(scenario);
         var gap = ComputeMaxOptimalGapScore(scenario, context);
 
-        var totalWeight = Stage3BlockOrderWeight + Stage3BlacklistWeight + Stage3LocationWeight + Stage3MaxGapWeight;
+        // A context without an open carry-in package drops the term AND its weight, so the stage-3
+        // value of such a run is bit-identical to the value before the term existed.
+        var (anchor, packages) = ResolveCarryInPackages(context);
+        var carryInWeight = packages.Count > 0 ? Stage3CarryInWeight : 0;
+        var carryIn = carryInWeight > 0 ? ComputeCarryInContinuityScore(scenario, anchor, packages) : 0;
+
+        var totalWeight = Stage3BlockOrderWeight + Stage3BlacklistWeight + Stage3LocationWeight
+            + Stage3MaxGapWeight + carryInWeight;
         if (totalWeight <= 0)
         {
             return 0;
@@ -336,7 +351,60 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         return (blockOrder * Stage3BlockOrderWeight
                 + blacklist * Stage3BlacklistWeight
                 + location * Stage3LocationWeight
-                + gap * Stage3MaxGapWeight) / totalWeight;
+                + gap * Stage3MaxGapWeight
+                + (carryIn * carryInWeight)) / totalWeight;
+    }
+
+    /// <summary>
+    /// Open carry-in packages of the context, detected once and cached: the detection reads only the
+    /// fixed works, which do not change during a run, and the evaluator is called from many threads.
+    /// </summary>
+    private (DateOnly Anchor, IReadOnlyList<CarryInPackage> Packages) ResolveCarryInPackages(
+        CoreWizardContext context)
+    {
+        lock (_carryInLock)
+        {
+            if (!ReferenceEquals(_carryInContext, context))
+            {
+                _carryInAnchor = CarryInContinuation.FirstPlannableDay(context);
+                _carryInPackages = CarryInContinuation.Detect(context, _carryInAnchor);
+                _carryInContext = context;
+            }
+
+            return (_carryInAnchor, _carryInPackages!);
+        }
+    }
+
+    /// <summary>
+    /// Share of the owed continuation days that the plan actually holds — same employee, same day,
+    /// same order. Protects the constructed continuation against drift once the operators start
+    /// moving tokens; it sits in stage 3 and therefore never outranks legality, coverage, the
+    /// guaranteed hours or the top-down rule.
+    /// </summary>
+    private static double ComputeCarryInContinuityScore(
+        CoreScenario scenario, DateOnly anchor, IReadOnlyList<CarryInPackage> packages)
+    {
+        var held = new HashSet<(string AgentId, DateOnly Date, Guid ShiftRefId)>();
+        foreach (var token in scenario.Tokens)
+        {
+            held.Add((token.AgentId, token.Date, token.ShiftRefId));
+        }
+
+        var owed = 0;
+        var kept = 0;
+        foreach (var package in packages)
+        {
+            for (var offset = 0; offset < package.RemainingDays; offset++)
+            {
+                owed++;
+                if (held.Contains((package.AgentId, anchor.AddDays(offset), package.ShiftRefId)))
+                {
+                    kept++;
+                }
+            }
+        }
+
+        return owed == 0 ? 1 : kept / (double)owed;
     }
 
     private const int ShiftTypeCycleLength = 3;

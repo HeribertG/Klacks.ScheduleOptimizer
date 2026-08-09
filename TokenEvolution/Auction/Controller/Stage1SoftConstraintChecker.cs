@@ -10,6 +10,12 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 /// then rest"), MinRestDays (gap between blocks), PreferredShift (slot is in the agent's
 /// Preferred list when any preference exists). MaxConsecutiveDays is a HARD cap and lives
 /// in Stage0HardConstraintChecker.
+/// <para>
+/// The block length is measured across the period boundary, exactly like the hard cap in
+/// <c>Stage0HardConstraintChecker</c> and the block rule in <c>SlotConstraintFilter</c>: a package
+/// that started in the previous month is as real as one that started inside the period, and counting
+/// only the in-period days would let the auction extend a carried-in five-day package to six.
+/// </para>
 /// </summary>
 public sealed class Stage1SoftConstraintChecker
 {
@@ -24,7 +30,7 @@ public sealed class Stage1SoftConstraintChecker
             return null;
         }
 
-        var blockVeto = CheckBlockLength(agent, date, alreadyAssigned);
+        var blockVeto = CheckBlockLength(agent, date, alreadyAssigned, context);
         if (blockVeto != null)
         {
             return blockVeto;
@@ -72,7 +78,7 @@ public sealed class Stage1SoftConstraintChecker
     }
 
     private static VetoVerdict? CheckBlockLength(
-        CoreAgent agent, DateOnly date, IReadOnlyList<CoreToken> assigned)
+        CoreAgent agent, DateOnly date, IReadOnlyList<CoreToken> assigned, CoreWizardContext context)
     {
         var softCap = agent.MaxWorkDays > 0 ? agent.MaxWorkDays : 0;
         if (softCap <= 0)
@@ -80,8 +86,8 @@ public sealed class Stage1SoftConstraintChecker
             return null;
         }
 
-        var before = CountConsecutive(agent.Id, date, assigned, step: -1);
-        var after = CountConsecutive(agent.Id, date, assigned, step: +1);
+        var before = CountConsecutive(agent.Id, date, assigned, context, step: -1);
+        var after = CountConsecutive(agent.Id, date, assigned, context, step: +1);
         var runLength = before + 1 + after;
 
         if (runLength > softCap)
@@ -134,16 +140,43 @@ public sealed class Stage1SoftConstraintChecker
     }
 
     private static int CountConsecutive(
-        string agentId, DateOnly anchor, IReadOnlyList<CoreToken> assigned, int step)
+        string agentId, DateOnly anchor, IReadOnlyList<CoreToken> assigned, CoreWizardContext context, int step)
     {
         var count = 0;
         var probe = anchor.AddDays(step);
-        while (HasAssignmentOnDate(agentId, probe, assigned))
+        while (HasAssignmentOnDate(agentId, probe, assigned) || IsOccupiedByBoundaryWork(agentId, probe, context))
         {
             count++;
             probe = probe.AddDays(step);
         }
         return count;
+    }
+
+    private static bool IsOccupiedByBoundaryWork(string agentId, DateOnly date, CoreWizardContext context)
+    {
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            if (locked.AgentId == agentId && OccupiesDate(locked.StartAt, locked.EndAt, date))
+            {
+                return true;
+            }
+        }
+
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            if (blocker.AgentId == agentId && OccupiesDate(blocker.StartAt, blocker.EndAt, date))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool OccupiesDate(DateTime startAt, DateTime endAt, DateOnly target)
+    {
+        var dayStart = target.ToDateTime(TimeOnly.MinValue);
+        return startAt < dayStart.AddDays(1) && endAt > dayStart;
     }
 
     private static bool HasAssignmentOnDate(

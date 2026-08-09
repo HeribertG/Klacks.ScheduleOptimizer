@@ -57,11 +57,12 @@ public sealed class TopDownHandover
 
         var tokens = scenario.Tokens.ToList();
         var hours = BuildHours(tokens, context);
+        var continuation = BuildContinuationDays(context);
         var changed = false;
 
         for (var walk = 0; walk < MaxRosterWalks; walk++)
         {
-            if (!WalkRoster(tokens, hours, context))
+            if (!WalkRoster(tokens, hours, context, continuation))
             {
                 break;
             }
@@ -79,8 +80,12 @@ public sealed class TopDownHandover
     /// <param name="tokens">Working copy of the plan; owners are rewritten in place</param>
     /// <param name="hours">Hours per agent including surcharges; kept in sync with the moves</param>
     /// <param name="context">Wizard context supplying the roster order and the rules</param>
+    /// <param name="continuation">Days that belong to an open carried-in package and may not be released</param>
     private static bool WalkRoster(
-        List<CoreToken> tokens, Dictionary<string, double> hours, CoreWizardContext context)
+        List<CoreToken> tokens,
+        Dictionary<string, double> hours,
+        CoreWizardContext context,
+        IReadOnlySet<(string AgentId, DateOnly Date, Guid ShiftRefId)> continuation)
     {
         var changed = false;
 
@@ -99,7 +104,7 @@ public sealed class TopDownHandover
                     break;
                 }
 
-                var index = FindHandover(receiver, receiverIndex, tokens, context);
+                var index = FindHandover(receiver, receiverIndex, tokens, context, continuation);
                 if (index < 0)
                 {
                     break;
@@ -150,7 +155,8 @@ public sealed class TopDownHandover
         CoreAgent receiver,
         int receiverIndex,
         IReadOnlyList<CoreToken> tokens,
-        CoreWizardContext context)
+        CoreWizardContext context,
+        IReadOnlySet<(string AgentId, DateOnly Date, Guid ShiftRefId)> continuation)
     {
         var receiverTokens = new List<CoreToken>();
         foreach (var token in tokens)
@@ -181,7 +187,8 @@ public sealed class TopDownHandover
                     continue;
                 }
 
-                if (!MayRelease(donorDays, token.Date))
+                if (continuation.Contains((donor.Id, token.Date, token.ShiftRefId))
+                    || !MayRelease(donorDays, token.Date))
                 {
                     continue;
                 }
@@ -252,6 +259,30 @@ public sealed class TopDownHandover
     /// conservative for a contract with MinRestDays of one or zero: such a split would be legal there,
     /// and this pass simply does not use it.
     /// </summary>
+    /// <summary>
+    /// The days an open carried-in package still owes, per employee and order. The handover may not
+    /// take these away: the last day of such a package sits at the edge of the donor's block, so the
+    /// structural donor protection would wave it through and the pass would undo the construction the
+    /// seeding strategies just performed.
+    /// </summary>
+    /// <param name="context">Wizard context supplying the roster, the period and the fixed works</param>
+    private static HashSet<(string AgentId, DateOnly Date, Guid ShiftRefId)> BuildContinuationDays(
+        CoreWizardContext context)
+    {
+        var days = new HashSet<(string, DateOnly, Guid)>();
+        var anchor = CarryInContinuation.FirstPlannableDay(context);
+
+        foreach (var package in CarryInContinuation.Detect(context, anchor))
+        {
+            for (var offset = 0; offset < package.RemainingDays; offset++)
+            {
+                days.Add((package.AgentId, anchor.AddDays(offset), package.ShiftRefId));
+            }
+        }
+
+        return days;
+    }
+
     private static bool MayRelease(IReadOnlyDictionary<DateOnly, int> donorDays, DateOnly date)
     {
         if (donorDays.GetValueOrDefault(date, 0) > 1)

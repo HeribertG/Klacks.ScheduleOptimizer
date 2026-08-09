@@ -12,6 +12,7 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 /// completely up to its target before moving on; later agents take whatever slots remain.
 /// Phase 2 enforces 100% coverage: any leftover slot is assigned to the least-loaded agent
 /// (constraint-valid first, falling back to force-assign).
+/// Slots already staffed by a locked work or by the carry-in pre-pass never enter either phase.
 /// </summary>
 public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
 {
@@ -22,8 +23,9 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
     {
         var tokens = new List<CoreToken>(
             LockedTokenFactory.BuildLockedTokens(context.LockedWorks, context.SchedulingMaxConsecutiveDays));
+        var seed = CarryInContinuationSeeder.Seed(context, tokens);
 
-        var remainingSlots = context.Shifts.ToList();
+        var remainingSlots = context.Shifts.Where(slot => !seed.Occupancy.IsSatisfied(slot)).ToList();
         var hoursAssigned = new Dictionary<string, double>();
         foreach (var agent in context.Agents)
         {

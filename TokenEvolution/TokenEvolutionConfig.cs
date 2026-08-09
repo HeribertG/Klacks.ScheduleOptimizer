@@ -67,6 +67,9 @@ public sealed record TokenEvolutionConfig
     /// <summary>Stage-3 weight for staying within the optimal intra-day gap between tokens.</summary>
     public double FitnessStage3MaxGap { get; init; } = 0.1;
 
+    /// <summary>Stage-3 weight for holding the carried-in packages that are still open at the period start. Ignored, weight included, when the context has no open package.</summary>
+    public double FitnessStage3CarryIn { get; init; } = 0.2;
+
     /// <summary>Optional soft wall-clock budget. When exceeded the loop stops at the next generation boundary and returns the best solution found so far. Null = no time limit.</summary>
     public TimeSpan? MaxRuntime { get; init; }
 }

@@ -16,6 +16,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Conductor;
 /// to the best-scoring of them (ties broken by roster position, top wins). Once every candidate
 /// has reached its target the slot is surplus and goes to the bottom of the roster instead, so
 /// the top of the roster stays accurate ("the bottom eats what is left").
+/// Slots that already carry their full demand — locked works of a replanning run, and the packages
+/// the carry-in pre-pass continues — are not auctioned at all and produce no result entry.
 /// </summary>
 public sealed class SlotAuctioneer
 {
@@ -40,6 +42,7 @@ public sealed class SlotAuctioneer
     {
         var tokens = new List<CoreToken>(
             LockedTokenFactory.BuildLockedTokens(context.LockedWorks, context.SchedulingMaxConsecutiveDays));
+        var seed = CarryInContinuationSeeder.Seed(context, tokens);
 
         var orderedSlots = context.Shifts
             .OrderBy(s => s.Date, StringComparer.Ordinal)
@@ -59,11 +62,26 @@ public sealed class SlotAuctioneer
                 context.BoundaryExistingWorkBlockers);
         }
 
+        foreach (var token in seed.Placed)
+        {
+            if (states.TryGetValue(token.AgentId, out var before))
+            {
+                states[token.AgentId] = ApplyAssignmentToState(before, token);
+            }
+        }
+
         var escalation = new EscalationLog();
         var auctionResults = new List<AuctionResult>(orderedSlots.Count);
 
         foreach (var slot in orderedSlots)
         {
+            // A slot already staffed by a locked work or by the carry-in pre-pass is not for sale;
+            // auctioning it a second time would put two employees on one place.
+            if (seed.Occupancy.IsSatisfied(slot))
+            {
+                continue;
+            }
+
             var result = AwardSlot(slot, tokens, states, context, escalation, rosterPosition);
             auctionResults.Add(result);
             if (result.WinnerAgentId is null)

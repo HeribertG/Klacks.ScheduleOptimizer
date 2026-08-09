@@ -12,7 +12,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 /// <see cref="MotivationFormula"/> score wins (roster position breaks ties, top first); once
 /// every valid agent has reached its target the surplus slot goes to the bottom of the roster
 /// so the top stays accurate. Slots without any valid agent remain unassigned — that marks the
-/// theoretical coverage ceiling for the context.
+/// theoretical coverage ceiling for the context. Slots already staffed by a locked work or by the
+/// carry-in pre-pass are skipped instead of being staffed a second time.
 /// </summary>
 public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
 {
@@ -20,6 +21,7 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
     {
         var tokens = new List<CoreToken>(
             LockedTokenFactory.BuildLockedTokens(context.LockedWorks, context.SchedulingMaxConsecutiveDays));
+        var seed = CarryInContinuationSeeder.Seed(context, tokens);
 
         var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
         var blockState = new Dictionary<string, AgentBlockState>(StringComparer.Ordinal);
@@ -37,7 +39,7 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
 
         foreach (var slot in orderedSlots)
         {
-            if (!DateOnly.TryParse(slot.Date, out var slotDate))
+            if (seed.Occupancy.IsSatisfied(slot) || !DateOnly.TryParse(slot.Date, out var slotDate))
             {
                 continue;
             }
