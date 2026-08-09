@@ -13,9 +13,10 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// <para>
 /// Every handover is gated by <see cref="SlotConstraintFilter.IsValidAssignment"/> for the receiver,
 /// which enforces the same block length, rest-day, rest-hour and eligibility rules that seeding,
-/// repair and reassign obey. The donor is protected structurally: a shift may only leave a day the
-/// donor keeps working, or a day at the edge of the donor's work block — releasing a day from the
-/// middle of a block would split it and could leave the donor with fewer than MinRestDays free days.
+/// repair and reassign obey. The donor is protected structurally by
+/// <see cref="HandoverGeometry.MayRelease"/>: a shift may only leave a day the donor keeps working,
+/// or a day at the edge of the donor's work block — releasing a day from the middle of a block would
+/// split it and could leave the donor with fewer than MinRestDays free days.
 /// </para>
 /// <para>
 /// Deterministic by construction: no random source, roster order for receivers, reverse roster order
@@ -36,12 +37,6 @@ public sealed class TopDownHandover
     /// </summary>
     private const int MaxRosterWalks = 16;
 
-    /// <summary>Penalty for a shift that starts an isolated new block for the receiver instead of extending one.</summary>
-    private const int NewBlockPenalty = 1;
-
-    /// <summary>Penalty for a shift whose kind differs from the neighbouring day of the receiver's block.</summary>
-    private const int MixedKindPenalty = 1;
-
     /// <summary>
     /// Returns a scenario in which the guaranteed hours are served top-down, or the unchanged input
     /// when no legal handover exists.
@@ -56,8 +51,8 @@ public sealed class TopDownHandover
         }
 
         var tokens = scenario.Tokens.ToList();
-        var hours = BuildHours(tokens, context);
-        var continuation = BuildContinuationDays(context);
+        var hours = HandoverGeometry.BuildHours(tokens, context);
+        var continuation = HandoverGeometry.BuildContinuationDays(context);
         var changed = false;
 
         for (var walk = 0; walk < MaxRosterWalks; walk++)
@@ -127,24 +122,6 @@ public sealed class TopDownHandover
         return changed;
     }
 
-    private static Dictionary<string, double> BuildHours(
-        IReadOnlyList<CoreToken> tokens, CoreWizardContext context)
-    {
-        var hours = new Dictionary<string, double>(StringComparer.Ordinal);
-        foreach (var agent in context.Agents)
-        {
-            hours[agent.Id] = agent.CurrentHours;
-        }
-
-        foreach (var token in tokens)
-        {
-            hours[token.AgentId] = hours.GetValueOrDefault(token.AgentId, 0)
-                + (double)(token.TotalHours + token.Surcharges);
-        }
-
-        return hours;
-    }
-
     /// <summary>
     /// Index of the token the receiver should take next, or -1 when no agent below it holds a shift
     /// the receiver may legally take. Donors are asked from the bottom of the roster upwards, and the
@@ -167,12 +144,12 @@ public sealed class TopDownHandover
             }
         }
 
-        var receiverDays = BuildKindByDay(receiverTokens);
+        var receiverDays = HandoverGeometry.BuildKindByDay(receiverTokens);
 
         for (var donorIndex = context.Agents.Count - 1; donorIndex > receiverIndex; donorIndex--)
         {
             var donor = context.Agents[donorIndex];
-            var donorDays = BuildOccupiedDays(tokens, donor.Id, context);
+            var donorDays = HandoverGeometry.BuildOccupiedDays(tokens, donor.Id, context);
 
             var bestIndex = -1;
             var bestPenalty = int.MaxValue;
@@ -188,7 +165,7 @@ public sealed class TopDownHandover
                 }
 
                 if (continuation.Contains((donor.Id, token.Date, token.ShiftRefId))
-                    || !MayRelease(donorDays, token.Date))
+                    || !HandoverGeometry.MayRelease(donorDays, token.Date))
                 {
                     continue;
                 }
@@ -207,13 +184,14 @@ public sealed class TopDownHandover
                     continue;
                 }
 
-                var penalty = ReceiverPenalty(receiverDays, token);
-                var blockLength = BlockLengthAt(donorDays, token.Date);
+                var penalty = HandoverGeometry.ReceiverPenalty(receiverDays, token);
+                var blockLength = HandoverGeometry.BlockLengthAt(donorDays, token.Date);
 
                 if (bestIndex < 0
                     || penalty < bestPenalty
                     || (penalty == bestPenalty && blockLength < bestBlockLength)
-                    || (penalty == bestPenalty && blockLength == bestBlockLength && IsEarlier(token, bestToken)))
+                    || (penalty == bestPenalty && blockLength == bestBlockLength
+                        && HandoverGeometry.IsEarlier(token, bestToken)))
                 {
                     bestIndex = i;
                     bestPenalty = penalty;
@@ -229,147 +207,5 @@ public sealed class TopDownHandover
         }
 
         return -1;
-    }
-
-    /// <summary>
-    /// How badly a shift would damage the receiver's package structure: it costs when it opens an
-    /// isolated new block, and it costs when it extends a block with a foreign shift kind.
-    /// </summary>
-    private static int ReceiverPenalty(IReadOnlyDictionary<DateOnly, int> receiverDays, CoreToken token)
-    {
-        var hasPrevious = receiverDays.TryGetValue(token.Date.AddDays(-1), out var previousKind);
-        var hasNext = receiverDays.TryGetValue(token.Date.AddDays(1), out var nextKind);
-
-        if (!hasPrevious && !hasNext)
-        {
-            return NewBlockPenalty + MixedKindPenalty;
-        }
-
-        var matches = (hasPrevious && previousKind == token.ShiftTypeIndex)
-            || (hasNext && nextKind == token.ShiftTypeIndex);
-
-        return matches ? 0 : MixedKindPenalty;
-    }
-
-    /// <summary>
-    /// True when the donor may lose this shift without breaking its own block structure: either the
-    /// donor keeps another shift on that day, or the day sits at the edge of its work block. Releasing
-    /// a day enclosed by two worked days splits the block and leaves a gap of exactly one free day,
-    /// which is below MinRestDays for every contract that asks for two. The rule is deliberately
-    /// conservative for a contract with MinRestDays of one or zero: such a split would be legal there,
-    /// and this pass simply does not use it.
-    /// </summary>
-    /// <summary>
-    /// The days an open carried-in package still owes, per employee and order. The handover may not
-    /// take these away: the last day of such a package sits at the edge of the donor's block, so the
-    /// structural donor protection would wave it through and the pass would undo the construction the
-    /// seeding strategies just performed.
-    /// </summary>
-    /// <param name="context">Wizard context supplying the roster, the period and the fixed works</param>
-    private static HashSet<(string AgentId, DateOnly Date, Guid ShiftRefId)> BuildContinuationDays(
-        CoreWizardContext context)
-    {
-        var days = new HashSet<(string, DateOnly, Guid)>();
-        var anchor = CarryInContinuation.FirstPlannableDay(context);
-
-        foreach (var package in CarryInContinuation.Detect(context, anchor))
-        {
-            for (var offset = 0; offset < package.RemainingDays; offset++)
-            {
-                days.Add((package.AgentId, anchor.AddDays(offset), package.ShiftRefId));
-            }
-        }
-
-        return days;
-    }
-
-    private static bool MayRelease(IReadOnlyDictionary<DateOnly, int> donorDays, DateOnly date)
-    {
-        if (donorDays.GetValueOrDefault(date, 0) > 1)
-        {
-            return true;
-        }
-
-        return !donorDays.ContainsKey(date.AddDays(-1)) || !donorDays.ContainsKey(date.AddDays(1));
-    }
-
-    private static int BlockLengthAt(IReadOnlyDictionary<DateOnly, int> occupiedDays, DateOnly date)
-    {
-        var length = 1;
-        for (var probe = date.AddDays(-1); occupiedDays.ContainsKey(probe); probe = probe.AddDays(-1))
-        {
-            length++;
-        }
-
-        for (var probe = date.AddDays(1); occupiedDays.ContainsKey(probe); probe = probe.AddDays(1))
-        {
-            length++;
-        }
-
-        return length;
-    }
-
-    /// <summary>Shift kind per worked day of one agent; a day with several kinds keeps the first in date order.</summary>
-    private static Dictionary<DateOnly, int> BuildKindByDay(IReadOnlyList<CoreToken> agentTokens)
-    {
-        var kinds = new Dictionary<DateOnly, int>();
-        foreach (var token in agentTokens.OrderBy(t => t.Date).ThenBy(t => t.StartAt))
-        {
-            kinds.TryAdd(token.Date, token.ShiftTypeIndex);
-        }
-
-        return kinds;
-    }
-
-    /// <summary>
-    /// Number of shifts the agent holds per calendar day, including the fixed work of the previous
-    /// period: a carried-in day is as real a block neighbour as a planned one, and ignoring it would
-    /// let the pass split a block across the period boundary.
-    /// </summary>
-    private static Dictionary<DateOnly, int> BuildOccupiedDays(
-        IReadOnlyList<CoreToken> tokens, string agentId, CoreWizardContext context)
-    {
-        var days = new Dictionary<DateOnly, int>();
-
-        foreach (var token in tokens)
-        {
-            if (string.Equals(token.AgentId, agentId, StringComparison.Ordinal))
-            {
-                days[token.Date] = days.GetValueOrDefault(token.Date, 0) + 1;
-            }
-        }
-
-        foreach (var locked in context.BoundaryLockedWorks)
-        {
-            if (string.Equals(locked.AgentId, agentId, StringComparison.Ordinal))
-            {
-                days[locked.Date] = days.GetValueOrDefault(locked.Date, 0) + 1;
-            }
-        }
-
-        foreach (var blocker in context.BoundaryExistingWorkBlockers)
-        {
-            if (string.Equals(blocker.AgentId, agentId, StringComparison.Ordinal))
-            {
-                days[blocker.Date] = days.GetValueOrDefault(blocker.Date, 0) + 1;
-            }
-        }
-
-        return days;
-    }
-
-    private static bool IsEarlier(CoreToken candidate, CoreToken incumbent)
-    {
-        if (candidate.Date != incumbent.Date)
-        {
-            return candidate.Date < incumbent.Date;
-        }
-
-        if (candidate.StartAt != incumbent.StartAt)
-        {
-            return candidate.StartAt < incumbent.StartAt;
-        }
-
-        return candidate.ShiftRefId.CompareTo(incumbent.ShiftRefId) < 0;
     }
 }
