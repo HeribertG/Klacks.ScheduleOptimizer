@@ -26,7 +26,7 @@ public sealed class EvaluationContext
         CommandsByAgentDate = BuildCommands(context);
         BreakBlockersByAgent = BuildBreakBlockers(context);
         AgentsWithMaximumHours = context.Agents.Where(a => a.MaximumHours > 0).ToList();
-        (SlotCapacities, SlotsByKey) = BuildSlots(context);
+        (SlotCapacities, SlotsByKey, LocationContextByShift) = BuildSlots(context);
     }
 
     /// <summary>Agents by id; first entry wins on duplicates.</summary>
@@ -53,6 +53,13 @@ public sealed class EvaluationContext
 
     /// <summary>Shift definition per (shift, date); first match wins, mirroring the former linear search.</summary>
     public IReadOnlyDictionary<(Guid ShiftRefId, DateOnly Date), CoreShift> SlotsByKey { get; }
+
+    /// <summary>
+    /// Order identity per shift definition, for the producers that hold a shift reference but no slot
+    /// object (repair, warm start). A shift definition belongs to the same order on every date, so the
+    /// date is not part of the key; shifts without a location context are absent from the table.
+    /// </summary>
+    public IReadOnlyDictionary<Guid, string> LocationContextByShift { get; }
 
     /// <summary>Returns the frozen lookups of <paramref name="context"/>, building them on first use.</summary>
     public static EvaluationContext For(CoreWizardContext context)
@@ -115,11 +122,14 @@ public sealed class EvaluationContext
         return result;
     }
 
-    private static (Dictionary<(Guid, DateOnly), int> Capacities, Dictionary<(Guid, DateOnly), CoreShift> Slots)
+    private static (Dictionary<(Guid, DateOnly), int> Capacities,
+        Dictionary<(Guid, DateOnly), CoreShift> Slots,
+        Dictionary<Guid, string> Locations)
         BuildSlots(CoreWizardContext context)
     {
         var capacities = new Dictionary<(Guid, DateOnly), int>();
         var slots = new Dictionary<(Guid, DateOnly), CoreShift>();
+        var locations = new Dictionary<Guid, string>();
 
         foreach (var shift in context.Shifts)
         {
@@ -132,8 +142,13 @@ public sealed class EvaluationContext
             capacities.TryGetValue(key, out var current);
             capacities[key] = current + Math.Max(1, shift.RequiredAssignments);
             slots.TryAdd(key, shift);
+
+            if (shift.LocationContext is { Length: > 0 } location)
+            {
+                locations.TryAdd(shiftRefId, location);
+            }
         }
 
-        return (capacities, slots);
+        return (capacities, slots, locations);
     }
 }

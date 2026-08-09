@@ -252,7 +252,8 @@ public sealed class TokenRepair : ITokenOperator
             BlockId: Guid.NewGuid(),
             PositionInBlock: 0,
             IsLocked: false,
-            LocationContext: null,
+            LocationContext: EvaluationContext.For(wizard)
+                .LocationContextByShift.GetValueOrDefault(violation.ShiftRefId.Value),
             ShiftRefId: violation.ShiftRefId.Value,
             AgentId: chosen.Id)
         {
@@ -395,7 +396,8 @@ public sealed class TokenRepair : ITokenOperator
             BlockId: Guid.NewGuid(),
             PositionInBlock: 0,
             IsLocked: false,
-            LocationContext: null,
+            LocationContext: EvaluationContext.For(wizard)
+                .LocationContextByShift.GetValueOrDefault(shiftRefId),
             ShiftRefId: shiftRefId,
             AgentId: agent.Id)
         {

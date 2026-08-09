@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
+using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
@@ -115,7 +116,8 @@ public sealed class WarmStartTokenStrategy : ITokenPopulationStrategy
                     BlockId: Guid.NewGuid(),
                     PositionInBlock: 0,
                     IsLocked: false,
-                    LocationContext: null,
+                    LocationContext: EvaluationContext.For(context)
+                        .LocationContextByShift.GetValueOrDefault(assignment.ShiftRefId),
                     ShiftRefId: assignment.ShiftRefId,
                     AgentId: assignment.AgentId)
                 {

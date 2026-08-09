@@ -497,24 +497,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     }
 
     private static double ComputeLocationContinuityScore(CoreScenario scenario)
-    {
-        var pairs = 0;
-        var switches = 0;
-        foreach (var perAgent in scenario.Tokens.GroupBy(t => t.AgentId))
-        {
-            var ordered = perAgent.OrderBy(t => t.StartAt).ToList();
-            for (var i = 1; i < ordered.Count; i++)
-            {
-                pairs++;
-                if (ordered[i].LocationContext != ordered[i - 1].LocationContext)
-                {
-                    switches++;
-                }
-            }
-        }
-
-        return pairs == 0 ? 1 : 1.0 - (switches / (double)pairs);
-    }
+        => LocationContinuity.Score(scenario);
 
     private static double ComputeMaxOptimalGapScore(CoreScenario scenario, CoreWizardContext context)
     {

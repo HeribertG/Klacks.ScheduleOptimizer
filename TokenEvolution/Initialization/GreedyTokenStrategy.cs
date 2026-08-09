@@ -90,7 +90,7 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                     BlockId: Guid.NewGuid(),
                     PositionInBlock: 0,
                     IsLocked: false,
-                    LocationContext: null,
+                    LocationContext: chosen.LocationContext,
                     ShiftRefId: Guid.TryParse(chosen.Id, out var shiftRef) ? shiftRef : Guid.Empty,
                     AgentId: agent.Id)
                 {
@@ -162,7 +162,7 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                 BlockId: Guid.NewGuid(),
                 PositionInBlock: 0,
                 IsLocked: false,
-                LocationContext: null,
+                LocationContext: slot.LocationContext,
                 ShiftRefId: Guid.TryParse(slot.Id, out var shiftRef) ? shiftRef : Guid.Empty,
                 AgentId: agent.Id)
             {

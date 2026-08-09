@@ -22,4 +22,13 @@ public record CoreShift(
     string EndTime,
     double Hours,
     int RequiredAssignments,
-    int Priority);
+    int Priority)
+{
+    /// <summary>
+    /// Identity of the order (customer object) this slot belongs to; null when the caller does not
+    /// resolve orders. Deliberately an init-only property and not a positional parameter: every
+    /// existing construction site keeps compiling, and a context that leaves it null scores exactly
+    /// as before, because a uniform location context produces a continuity score of 1.
+    /// </summary>
+    public string? LocationContext { get; init; }
+}

@@ -110,7 +110,10 @@ public sealed class Stage0HardConstraintChecker
             EndTime: endTime,
             Hours: (double)token.TotalHours,
             RequiredAssignments: 1,
-            Priority: 0);
+            Priority: 0)
+        {
+            LocationContext = token.LocationContext,
+        };
     }
 
     public VetoVerdict? Check(

@@ -231,7 +231,7 @@ public sealed class SlotAuctioneer
             BlockId: Guid.NewGuid(),
             PositionInBlock: 0,
             IsLocked: false,
-            LocationContext: null,
+            LocationContext: slot.LocationContext,
             ShiftRefId: Guid.TryParse(slot.Id, out var sr) ? sr : Guid.Empty,
             AgentId: agentId)
         {

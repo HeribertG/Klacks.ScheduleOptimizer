@@ -74,7 +74,7 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
                 BlockId: Guid.NewGuid(),
                 PositionInBlock: 0,
                 IsLocked: false,
-                LocationContext: null,
+                LocationContext: slot.LocationContext,
                 ShiftRefId: shiftRefId,
                 AgentId: bestAgent.Id)
             {
