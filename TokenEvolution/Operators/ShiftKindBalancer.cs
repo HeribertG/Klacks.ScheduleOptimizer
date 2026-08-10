@@ -12,8 +12,11 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// hour, so guaranteed-hours and coverage stages are untouched — the swap can only trade the KIND
 /// distribution, which is what the shift-kind fairness rule asks for. Each candidate swap is gated by
 /// the full assignment filter on both sides (bans, keywords, rest hours at the block edges, daily
-/// caps) and accepted only when the lexicographic fitness strictly improves, so a swap can never buy
-/// fairness with a rotation or legality regression.
+/// caps) and then by one of two acceptance paths: the lexicographic fitness improves strictly, or
+/// <see cref="ParetoFairnessGate"/> confirms that the fairness rises while no numbered rule from 1 to 8
+/// moves the wrong way. A swap can therefore never buy fairness with a rotation, package-constancy or
+/// legality regression, but it may cost order loyalty (rule 10) or an unnumbered helper term, both of
+/// which the priority order places below fairness.
 /// <para>
 /// Deterministic by construction: no random source, candidate pairs are walked in roster order and
 /// block start order, first improvement wins, bounded by a fixed swap budget.
@@ -56,7 +59,8 @@ public sealed class ShiftKindBalancer
     private static CoreScenario? FindImprovingSwap(
         CoreScenario scenario, CoreWizardContext context, TokenFitnessEvaluator evaluator)
     {
-        var currentKindFairness = evaluator.ComputeShiftKindFairnessScore(scenario, context);
+        var current = ParetoFairnessGate.SnapshotOf(scenario, context, evaluator);
+        var currentKindFairness = current.ShiftKindFairness;
         var blocksByAgent = new Dictionary<string, List<KindBlock>>(StringComparer.Ordinal);
         foreach (var agent in context.Agents)
         {
@@ -91,8 +95,9 @@ public sealed class ShiftKindBalancer
                             continue;
                         }
 
-                        evaluator.Evaluate(candidate, context);
-                        if (evaluator.Compare(candidate, scenario) < 0)
+                        var proposed = ParetoFairnessGate.SnapshotOf(candidate, context, evaluator);
+                        if (evaluator.Compare(candidate, scenario) < 0
+                            || ParetoFairnessGate.Accepts(current, proposed))
                         {
                             return candidate;
                         }

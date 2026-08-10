@@ -101,10 +101,12 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
 
     /// <summary>
     /// Runs the full evaluation and additionally exposes the Stage-3/Stage-4 component breakdown that
-    /// <see cref="Evaluate"/> computes internally and discards. Intended for a single call on the winning
-    /// individual at run-end — it re-runs the shared private component methods, so the hot
-    /// <see cref="Evaluate"/> path stays untouched (no extra allocations per generation). The returned
-    /// stage aggregates are taken verbatim from the scenario filled by <see cref="Evaluate"/>.
+    /// <see cref="Evaluate"/> computes internally and discards. It re-runs the shared private component
+    /// methods on top of a full evaluation, so the hot <see cref="Evaluate"/> path stays untouched (no
+    /// extra allocations per generation) at the price of roughly doubling the Stage-3/Stage-4 work for
+    /// its own callers: the run-end capture, and the operators that have to compare single components
+    /// rather than stage aggregates. The returned stage aggregates are taken verbatim from the scenario
+    /// filled by <see cref="Evaluate"/>.
     /// </summary>
     public DetailedFitnessResult EvaluateDetailed(CoreScenario scenario, CoreWizardContext context)
     {
