@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
+using System.Globalization;
 using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
@@ -18,9 +19,30 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// what is left"). OverSupply and RemoveOffendingToken pick the doomed token with bottom-bias.
 /// Together with <see cref="ReassignMutation"/> this gives ~35% of GA mutation calls a
 /// top-down distribution pull.
+/// <para>
+/// Staffing an under-supplied slot climbs the escalation ladder <see cref="SlotRelaxation.None"/> →
+/// <see cref="SlotRelaxation.RestDaysOnly"/> → <see cref="SlotRelaxation.All"/> and stops at the
+/// first rung that answers. Each rung admits everything the rung before it admits, so the ladder can
+/// never cost a fill that the strict rung already had, while the block-ideal-abiding candidate keeps
+/// precedence: the widest rung is consulted only where the slot would otherwise stay empty, which is
+/// the priority order of the specification (coverage first, the 5/2 package ideal far below it).
+/// </para>
 /// </summary>
 public sealed class TokenRepair : ITokenOperator
 {
+    private const string DirectFill = "direct";
+
+    private const string RelocatedFill = "relocate";
+
+    private const string EscalationDateFormat = "yyyy-MM-dd";
+
+    private static readonly SlotRelaxation[] CoverageLadder =
+    [
+        SlotRelaxation.None,
+        SlotRelaxation.RestDaysOnly,
+        SlotRelaxation.All,
+    ];
+
     private readonly TokenConstraintChecker _checker;
 
     public TokenRepair(TokenConstraintChecker checker)
@@ -28,7 +50,18 @@ public sealed class TokenRepair : ITokenOperator
         _checker = checker;
     }
 
-    public CoreScenario Apply(TokenOperatorContext context)
+    public CoreScenario Apply(TokenOperatorContext context) => Apply(context, null);
+
+    /// <summary>
+    /// Applies the operator and reports every fill that only the widest rung of the escalation made
+    /// possible, so a diagnostics run can tell "the ladder was consulted" from "the ladder fired".
+    /// </summary>
+    /// <param name="context">Scenario to repair, wizard context and the random source</param>
+    /// <param name="escalations">
+    /// Optional sink invoked once per slot that was staffed on <see cref="SlotRelaxation.All"/>;
+    /// null switches the reporting off and costs one null check per escalated fill.
+    /// </param>
+    public CoreScenario Apply(TokenOperatorContext context, Action<string>? escalations)
     {
         var violations = _checker.Check(context.Primary, context.Wizard);
         if (violations.Count == 0)
@@ -47,7 +80,8 @@ public sealed class TokenRepair : ITokenOperator
         if (underSupply.Count > 0)
         {
             var pick = underSupply[context.Rng.Next(underSupply.Count)];
-            return TryRepairUnderSupply(context.Primary, context.Wizard, context.Rng, pick, out var repaired)
+            return TryRepairUnderSupply(
+                context.Primary, context.Wizard, context.Rng, pick, escalations, out var repaired)
                 ? repaired
                 : TokenSwapMutation.CloneScenario(context.Primary, context.Primary.Tokens.ToList());
         }
@@ -62,12 +96,21 @@ public sealed class TokenRepair : ITokenOperator
     /// candidate (theoretically unfillable) and moves on, so a single unreachable slot cannot abort
     /// coverage recovery for the remaining fillable ones.
     /// </summary>
+    /// <param name="scenario">Plan to complete; never modified.</param>
+    /// <param name="context">Wizard context supplying agents, slots and rules.</param>
+    /// <param name="rng">Random source of the sweep.</param>
+    /// <param name="cancellationToken">Cancels the sweep between slots.</param>
+    /// <param name="trace">Optional textual trace of the sweep's iterations.</param>
+    /// <param name="escalations">
+    /// Optional sink invoked once per slot that only the widest rung of the escalation could staff.
+    /// </param>
     public CoreScenario FillAllUnderSupply(
         CoreScenario scenario,
         CoreWizardContext context,
         Random rng,
         CancellationToken cancellationToken = default,
-        Action<string>? trace = null)
+        Action<string>? trace = null,
+        Action<string>? escalations = null)
     {
         var current = scenario;
         var iter = 0;
@@ -112,7 +155,7 @@ public sealed class TokenRepair : ITokenOperator
                     continue;
                 }
 
-                if (TryRepairUnderSupply(current, context, rng, violation, out var repaired))
+                if (TryRepairUnderSupply(current, context, rng, violation, escalations, out var repaired))
                 {
                     current = repaired;
                     progress = true;
@@ -156,12 +199,14 @@ public sealed class TokenRepair : ITokenOperator
     /// <param name="wizard">Wizard context supplying agents, slots and rules.</param>
     /// <param name="rng">Random source of the operator.</param>
     /// <param name="violation">The under-supply violation to answer.</param>
+    /// <param name="escalations">Optional sink for fills that only the widest rung made possible.</param>
     /// <param name="repaired">The repaired scenario, valid only when the method returns true.</param>
     private static bool TryRepairUnderSupply(
         CoreScenario primary,
         CoreWizardContext wizard,
         Random rng,
         ConstraintViolation violation,
+        Action<string>? escalations,
         out CoreScenario repaired)
     {
         repaired = primary;
@@ -204,45 +249,52 @@ public sealed class TokenRepair : ITokenOperator
             .Select(t => t.AgentId)
             .ToHashSet(StringComparer.Ordinal);
 
-        var candidates = wizard.Agents
-            .Where(agent => !occupiedAgents.Contains(agent.Id)
-                && SlotConstraintFilter.IsValidAssignment(
-                    agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours, wizard, primary.Tokens, slotStartUtc, slotEndUtc))
-            .ToList();
+        // The escalation ladder. Every rung first offers the slot to the agents that can take it
+        // directly and then to the one-move relocation, and the walk stops at the first rung with an
+        // answer. Rung 1 keeps every rule. Rung 2 lets the free block between two packages step aside:
+        // coverage outranks the rest days. Rung 3 additionally lets the MaxWorkDays block ideal step
+        // aside, which is what a slot needing the sixth consecutive day costs; it runs only where the
+        // slot would otherwise stay empty, so the block-ideal-abiding candidate always wins where one
+        // exists. No rung relaxes a hard rule - bans, rest hours, the consecutive-days cap and
+        // collisions gate the candidate on all three.
+        List<CoreAgent> candidates = [];
+        var reached = SlotRelaxation.None;
 
-        if (candidates.Count == 0)
+        foreach (var rung in CoverageLadder)
         {
-            if (TryRelocateAndFill(
-                    primary, wizard, violation.ShiftRefId.Value, violation.Date.Value,
-                    shiftTypeIndex, slotHours, slotStartUtc, slotEndUtc, occupiedAgents,
-                    relaxRestDays: false, out repaired))
-            {
-                return true;
-            }
-
-            // Coverage outranks the free block between two packages: when neither a strict fill nor a
-            // one-move relocation exists, retry with MinRestDays relaxed — every hard rule (bans, rest
-            // hours, consecutive-days cap, collisions) and the MaxWorkDays block ideal still gate the
-            // candidate. The block ideal is deliberately NOT relaxed: a package grown past the ideal
-            // here is what the finished plan is measured on and no later operator shortens it again.
-            // The relaxed one-move relocation is the last resort of the escalation.
             candidates = wizard.Agents
                 .Where(agent => !occupiedAgents.Contains(agent.Id)
                     && SlotConstraintFilter.IsValidAssignment(
                         agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours,
-                        wizard, primary.Tokens, slotStartUtc, slotEndUtc, relaxRestDays: true))
+                        wizard, primary.Tokens, slotStartUtc, slotEndUtc, rung))
                 .ToList();
 
-            if (candidates.Count == 0)
+            if (candidates.Count > 0)
             {
-                return TryRelocateAndFill(
+                reached = rung;
+                break;
+            }
+
+            if (TryRelocateAndFill(
                     primary, wizard, violation.ShiftRefId.Value, violation.Date.Value,
                     shiftTypeIndex, slotHours, slotStartUtc, slotEndUtc, occupiedAgents,
-                    relaxRestDays: true, out repaired);
+                    rung, escalations, out repaired))
+            {
+                return true;
             }
         }
 
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
         var chosen = RosterPositionBias.PickAccuracyAware(candidates, primary.Tokens, wizard.Agents, rng);
+        if (reached == SlotRelaxation.All)
+        {
+            ReportEscalation(escalations, chosen.Id, violation.Date.Value, DirectFill);
+        }
+
         var tokens = primary.Tokens.ToList();
         tokens.Add(new CoreToken(
             WorkIds: [],
@@ -272,7 +324,8 @@ public sealed class TokenRepair : ITokenOperator
     /// Deterministic and random-free — agents in roster order, blocker candidates are the outer edge
     /// days of the runs adjacent to the slot (removing an edge never splits a block), receivers are
     /// picked accuracy-aware (below guaranteed hours top-down first, surplus bottom-up second). The
-    /// reach is deliberately one move; a blocker in the middle of a run stays where it is.
+    /// reach is deliberately one move; a blocker in the middle of a run stays where it is. The rung of
+    /// the escalation is handed through, so the same escape serves all three of them.
     /// </summary>
     private static bool TryRelocateAndFill(
         CoreScenario primary,
@@ -284,7 +337,8 @@ public sealed class TokenRepair : ITokenOperator
         DateTime slotStartUtc,
         DateTime slotEndUtc,
         IReadOnlySet<string> occupiedAgents,
-        bool relaxRestDays,
+        SlotRelaxation relaxation,
+        Action<string>? escalations,
         out CoreScenario repaired)
     {
         repaired = primary;
@@ -311,13 +365,14 @@ public sealed class TokenRepair : ITokenOperator
             {
                 if (TryMoveBlockersAndFill(
                         primary, wizard, agent, [blocker], slotDate, shiftTypeIndex, shiftRefId,
-                        slotHours, slotStartUtc, slotEndUtc, relaxRestDays, out repaired))
+                        slotHours, slotStartUtc, slotEndUtc, relaxation, out repaired))
                 {
+                    ReportRelocationEscalation(escalations, relaxation, agent.Id, slotDate);
                     return true;
                 }
             }
 
-            if (!relaxRestDays)
+            if (relaxation == SlotRelaxation.None)
             {
                 continue;
             }
@@ -331,8 +386,9 @@ public sealed class TokenRepair : ITokenOperator
                 {
                     if (TryMoveBlockersAndFill(
                             primary, wizard, agent, [blockers[i], blockers[j]], slotDate, shiftTypeIndex,
-                            shiftRefId, slotHours, slotStartUtc, slotEndUtc, relaxRestDays, out repaired))
+                            shiftRefId, slotHours, slotStartUtc, slotEndUtc, relaxation, out repaired))
                     {
+                        ReportRelocationEscalation(escalations, relaxation, agent.Id, slotDate);
                         return true;
                     }
                 }
@@ -345,7 +401,9 @@ public sealed class TokenRepair : ITokenOperator
     /// <summary>
     /// Removes the given blockers of one agent, verifies the agent may then take the slot, finds a
     /// receiver for every removed blocker on the growing swapped state and builds the repaired plan —
-    /// or returns false without side effects when any step has no legal answer.
+    /// or returns false without side effects when any step has no legal answer. The escalation rung
+    /// buys the OPEN slot only: a receiver of a relocated shift is never taken past its own block
+    /// ideal, so one escalated move can grow at most one package beyond the ideal.
     /// </summary>
     private static bool TryMoveBlockersAndFill(
         CoreScenario primary,
@@ -358,7 +416,7 @@ public sealed class TokenRepair : ITokenOperator
         decimal slotHours,
         DateTime slotStartUtc,
         DateTime slotEndUtc,
-        bool relaxRestDays,
+        SlotRelaxation relaxation,
         out CoreScenario repaired)
     {
         repaired = primary;
@@ -367,14 +425,15 @@ public sealed class TokenRepair : ITokenOperator
 
         if (!SlotConstraintFilter.IsValidAssignment(
                 agent, slotDate, shiftTypeIndex, shiftRefId, slotHours,
-                wizard, working, slotStartUtc, slotEndUtc, relaxRestDays))
+                wizard, working, slotStartUtc, slotEndUtc, relaxation))
         {
             return false;
         }
 
+        var receiverRelaxation = ReceiverRelaxation(relaxation);
         foreach (var blocker in blockers)
         {
-            var receiver = FindRelocationReceiver(agent, blocker, working, wizard, relaxRestDays);
+            var receiver = FindRelocationReceiver(agent, blocker, working, wizard, receiverRelaxation);
             if (receiver is null)
             {
                 return false;
@@ -490,7 +549,7 @@ public sealed class TokenRepair : ITokenOperator
         CoreToken blocker,
         IReadOnlyList<CoreToken> stateTokens,
         CoreWizardContext wizard,
-        bool relaxRestDays)
+        SlotRelaxation relaxation)
     {
         var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var token in stateTokens)
@@ -526,7 +585,7 @@ public sealed class TokenRepair : ITokenOperator
             if (SlotConstraintFilter.IsValidAssignment(
                     candidate, blocker.Date, blocker.ShiftTypeIndex, blocker.ShiftRefId,
                     blocker.TotalHours, wizard, stateTokens, blocker.StartAt, blocker.EndAt,
-                    relaxRestDays))
+                    relaxation))
             {
                 return candidate;
             }
@@ -534,6 +593,45 @@ public sealed class TokenRepair : ITokenOperator
 
         return null;
     }
+
+    /// <summary>
+    /// The rung a receiver of a relocated shift is filtered with. The widest rung is reserved for the
+    /// open slot; a receiver stays block-ideal-abiding, which keeps the blast radius of one escalated
+    /// move at a single package and leaves the candidate set of the rung a superset of the one below.
+    /// </summary>
+    /// <param name="relaxation">Rung the open slot is being filled on</param>
+    private static SlotRelaxation ReceiverRelaxation(SlotRelaxation relaxation)
+        => relaxation == SlotRelaxation.All ? SlotRelaxation.RestDaysOnly : relaxation;
+
+    /// <summary>
+    /// Reports a relocation that only the widest rung made possible.
+    /// </summary>
+    /// <param name="escalations">Diagnostics sink; null switches the reporting off</param>
+    /// <param name="relaxation">Rung the relocation succeeded on</param>
+    /// <param name="agentId">Agent that took the open slot</param>
+    /// <param name="slotDate">Day of the staffed slot</param>
+    private static void ReportRelocationEscalation(
+        Action<string>? escalations, SlotRelaxation relaxation, string agentId, DateOnly slotDate)
+    {
+        if (relaxation != SlotRelaxation.All)
+        {
+            return;
+        }
+
+        ReportEscalation(escalations, agentId, slotDate, RelocatedFill);
+    }
+
+    /// <summary>
+    /// Emits one line per slot that only the widest rung of the escalation could staff.
+    /// </summary>
+    /// <param name="escalations">Diagnostics sink; null switches the reporting off</param>
+    /// <param name="agentId">Agent that took the slot</param>
+    /// <param name="slotDate">Day of the staffed slot</param>
+    /// <param name="mode">How the slot was taken: directly or after a relocation</param>
+    private static void ReportEscalation(
+        Action<string>? escalations, string agentId, DateOnly slotDate, string mode)
+        => escalations?.Invoke(
+            $"{agentId} {slotDate.ToString(EscalationDateFormat, CultureInfo.InvariantCulture)} {mode}");
 
     private static CoreScenario RepairOverSupply(TokenOperatorContext context, ConstraintViolation violation)
     {

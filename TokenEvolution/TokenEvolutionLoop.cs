@@ -99,13 +99,20 @@ public sealed class TokenEvolutionLoop
     /// compared with its input and each newly created overlong package is reported with the step that
     /// built it. Null keeps the whole comparison out of the run.
     /// </param>
+    /// <param name="repairEscalations">
+    /// Optional sink for the coverage escalation of <see cref="TokenRepair"/>: when set, every slot
+    /// that only the widest rung of the ladder could staff is reported with the step that staffed it.
+    /// The sink fires on a successful fill, never on a consultation, so a silent run proves the rung
+    /// changed nothing. Null keeps the reporting out of the run.
+    /// </param>
     public CoreScenario Run(
         CoreWizardContext context,
         TokenEvolutionConfig config,
         IProgress<TokenEvolutionProgress>? progress = null,
         CancellationToken cancellationToken = default,
         Action<string>? trace = null,
-        Action<string>? blockDiagnostics = null)
+        Action<string>? blockDiagnostics = null,
+        Action<string>? repairEscalations = null)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         trace?.Invoke($"Run: enter (population={config.PopulationSize}, maxGen={config.MaxGenerations}, agents={context.Agents.Count}, shifts={context.Shifts.Count}, lockedWorks={context.LockedWorks.Count})");
@@ -155,6 +162,12 @@ public sealed class TokenEvolutionLoop
             }
 
             var genStart = sw.ElapsedMilliseconds;
+            var repairEscalationSink =
+                RepairEscalationTrace.For(repairEscalations, generation, RepairStage);
+            var sweepBeforeEscalationSink =
+                RepairEscalationTrace.For(repairEscalations, generation, SweepBeforePassesStage);
+            var sweepAfterEscalationSink =
+                RepairEscalationTrace.For(repairEscalations, generation, SweepAfterPassesStage);
 
             var next = population
                 .OrderBy(s => s, evaluator)
@@ -181,7 +194,8 @@ public sealed class TokenEvolutionLoop
                 if (rng.NextDouble() < config.MutationRate)
                 {
                     var parent = child;
-                    var (mutated, operatorName) = ApplyWeightedMutation(child, context, rng, config);
+                    var (mutated, operatorName) =
+                        ApplyWeightedMutation(child, context, rng, config, repairEscalationSink);
                     child = mutated;
                     ReportOverlong(blockDiagnostics, generation, operatorName, parent, child, context);
                 }
@@ -198,7 +212,8 @@ public sealed class TokenEvolutionLoop
             var sweepStart = sw.ElapsedMilliseconds;
             var preSweep = currentBest;
             var beforePass = currentBest;
-            currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
+            currentBest = RunCoverageSweep(
+                currentBest, context, rng, evaluator, cancellationToken, trace, sweepBeforeEscalationSink);
             ReportOverlong(blockDiagnostics, generation, SweepBeforePassesStage, beforePass, currentBest, context);
 
             beforePass = currentBest;
@@ -220,7 +235,8 @@ public sealed class TokenEvolutionLoop
             // The handover and balance passes reshape blocks, which can open a legal fill for a slot
             // the first sweep had to skip — one more sweep catches it in the same generation.
             beforePass = currentBest;
-            currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
+            currentBest = RunCoverageSweep(
+                currentBest, context, rng, evaluator, cancellationToken, trace, sweepAfterEscalationSink);
             ReportOverlong(blockDiagnostics, generation, SweepAfterPassesStage, beforePass, currentBest, context);
             if (!ReferenceEquals(currentBest, preSweep))
             {
@@ -273,8 +289,13 @@ public sealed class TokenEvolutionLoop
     /// <param name="context">Wizard context handed to the operator</param>
     /// <param name="rng">Random source of the run; the draw happens here and nowhere else</param>
     /// <param name="config">Supplies the five mutation weights</param>
+    /// <param name="repairEscalations">Optional sink for the coverage escalation of the repair operator</param>
     private (CoreScenario Scenario, string Operator) ApplyWeightedMutation(
-        CoreScenario child, CoreWizardContext context, Random rng, TokenEvolutionConfig config)
+        CoreScenario child,
+        CoreWizardContext context,
+        Random rng,
+        TokenEvolutionConfig config,
+        Action<string>? repairEscalations)
     {
         var total = config.MutationWeightSwap + config.MutationWeightSplit + config.MutationWeightMerge
                     + config.MutationWeightReassign + config.MutationWeightRepair;
@@ -310,7 +331,9 @@ public sealed class TokenEvolutionLoop
             return (_reassign.Apply(new TokenOperatorContext(child, null, context, rng)), ReassignStage);
         }
 
-        return (_repair.Apply(new TokenOperatorContext(child, null, context, rng)), RepairStage);
+        return (
+            _repair.Apply(new TokenOperatorContext(child, null, context, rng), repairEscalations),
+            RepairStage);
     }
 
     /// <summary>
@@ -574,9 +597,11 @@ public sealed class TokenEvolutionLoop
         Random rng,
         TokenFitnessEvaluator evaluator,
         CancellationToken cancellationToken = default,
-        Action<string>? trace = null)
+        Action<string>? trace = null,
+        Action<string>? escalations = null)
     {
-        var filled = _repair.FillAllUnderSupply(scenario, context, rng, cancellationToken, trace);
+        var filled = _repair.FillAllUnderSupply(
+            scenario, context, rng, cancellationToken, trace, escalations);
         if (filled.Tokens.Count != scenario.Tokens.Count)
         {
             evaluator.Evaluate(filled, context);

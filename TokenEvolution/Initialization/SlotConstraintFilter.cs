@@ -17,11 +17,13 @@ public static class SlotConstraintFilter
     /// per-agent MaximumHours, per-day MaxDailyHours (contract override or per-agent cap),
     /// per-agent MinPauseHours (incl. cross-day overnight gaps), block-length and rest-day rules.
     /// The optional slot interval enables the MinPauseHours check; pass null for keyword-only seeds.
-    /// With <paramref name="relaxRestDays"/> the MinRestDays rule steps aside so a slot no strictly
-    /// valid agent can take may still be filled: coverage outranks the free block between two
-    /// packages. The MaxWorkDays block ideal is NOT part of that relaxation — a package longer than
-    /// the ideal is measured on the finished plan, is never taken apart again by a later operator and
-    /// no fitness stage ranks it high enough to be rejected, so the cap holds on every path.
+    /// <paramref name="relaxation"/> selects the rung of the coverage escalation:
+    /// <see cref="SlotRelaxation.RestDaysOnly"/> lets the MinRestDays rule step aside so a slot no
+    /// strictly valid agent can take may still be filled, and <see cref="SlotRelaxation.All"/> adds
+    /// the MaxWorkDays block ideal to that — the last resort of the escalation, because coverage is
+    /// the highest rule of the specification and the block ideal is not. No rung touches a hard rule:
+    /// the MaxConsecutiveDays cap, collisions, bans, keywords, breaks, hour caps, the minimum pause
+    /// and the restricted windows veto on every rung.
     /// </summary>
     public static bool IsValidAssignment(
         CoreAgent agent,
@@ -33,7 +35,7 @@ public static class SlotConstraintFilter
         IReadOnlyList<CoreToken> alreadyAssigned,
         DateTime? slotStartUtc = null,
         DateTime? slotEndUtc = null,
-        bool relaxRestDays = false)
+        SlotRelaxation relaxation = SlotRelaxation.None)
     {
         // Qualification gating is a hard prerequisite and an O(1) lookup, so it runs first: an agent
         // lacking a mandatory qualification of the shift may never receive it (empty set = no-op).
@@ -82,12 +84,12 @@ public static class SlotConstraintFilter
             return false;
         }
 
-        if (ExceedsBlockLength(agent, date, context, alreadyAssigned))
+        if (ExceedsBlockLength(agent, date, context, alreadyAssigned, relaxation != SlotRelaxation.All))
         {
             return false;
         }
 
-        if (!relaxRestDays && ViolatesMinRestDays(agent, date, alreadyAssigned, context))
+        if (relaxation == SlotRelaxation.None && ViolatesMinRestDays(agent, date, alreadyAssigned, context))
         {
             return false;
         }
@@ -307,9 +309,10 @@ public static class SlotConstraintFilter
         CoreAgent agent,
         DateOnly date,
         CoreWizardContext context,
-        IReadOnlyList<CoreToken> assigned)
+        IReadOnlyList<CoreToken> assigned,
+        bool applySoftCap)
     {
-        var softCap = agent.MaxWorkDays > 0 ? agent.MaxWorkDays : 0;
+        var softCap = applySoftCap && agent.MaxWorkDays > 0 ? agent.MaxWorkDays : 0;
         var hardCap = agent.MaxConsecutiveDays > 0
             ? agent.MaxConsecutiveDays
             : context.SchedulingMaxConsecutiveDays;
