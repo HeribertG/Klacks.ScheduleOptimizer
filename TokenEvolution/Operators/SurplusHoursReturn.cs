@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli Private. All rights reserved.
 
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
@@ -25,6 +26,14 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// change; it only rewrites the owner of a token.
 /// </para>
 /// <para>
+/// Every single move carries its own acceptance gate. Offering the whole bundle of moves to the
+/// fitness at once makes one rejected move discard all the legal ones with it — the pass then reads
+/// as a no-op although most of its moves were improvements. Each move is therefore built, evaluated
+/// and compared on its own against the state the previous accepted move produced, exactly as the
+/// order-continuity balancer does, and a rejected candidate only ends its own candidacy: the scan
+/// continues with the next shift, the next donor and the next receiver.
+/// </para>
+/// <para>
 /// Deterministic by construction: no random source, receivers in roster order from the top, donors in
 /// roster order from the top, the shared candidate tie-break of
 /// <see cref="HandoverGeometry"/>, and a fixed upper bound on the number of moves.
@@ -41,11 +50,13 @@ public sealed class SurplusHoursReturn
 
     /// <summary>
     /// Returns a scenario in which the surplus hours are handed back down the roster, or the unchanged
-    /// input when no legal return exists.
+    /// input when no legal return improves the fitness.
     /// </summary>
     /// <param name="scenario">Plan to rebalance; never modified</param>
     /// <param name="context">Wizard context supplying the roster order, the rules and the fixed boundary work</param>
-    public CoreScenario Apply(CoreScenario scenario, CoreWizardContext context)
+    /// <param name="evaluator">Fitness evaluator used as the per-move acceptance gate</param>
+    public CoreScenario Apply(
+        CoreScenario scenario, CoreWizardContext context, TokenFitnessEvaluator evaluator)
     {
         if (context.Agents.Count < 2 || scenario.Tokens.Count == 0)
         {
@@ -55,34 +66,45 @@ public sealed class SurplusHoursReturn
         var tokens = scenario.Tokens.ToList();
         var hours = HandoverGeometry.BuildHours(tokens, context);
         var continuation = HandoverGeometry.BuildContinuationDays(context);
-        var changed = false;
 
+        // The gate compares against the incoming plan, so that plan needs its own stage values first.
+        // Evaluating is idempotent, and a caller that hands in an unscored plan would otherwise have
+        // every candidate compared against zeros and accepted.
+        evaluator.Evaluate(scenario, context);
+
+        var current = scenario;
         for (var move = 0; move < MaxReturns; move++)
         {
-            if (!ReturnOneShift(tokens, hours, context, continuation))
+            var accepted = ReturnOneShift(current, tokens, hours, context, evaluator, continuation);
+            if (accepted is null)
             {
                 break;
             }
 
-            changed = true;
+            current = accepted;
         }
 
-        return changed ? TokenSwapMutation.CloneScenario(scenario, tokens) : scenario;
+        return current;
     }
 
     /// <summary>
-    /// Moves a single shift from the best-ranked agent with a returnable surplus to the best-ranked
-    /// agent below it that is still short of its guarantee. Returns false when no such move exists,
-    /// which is the pass's termination condition and its no-op proof in a short-supply run.
+    /// Hands a single shift from the best-ranked agent with a returnable surplus to the best-ranked
+    /// agent below it that is still short of its guarantee, and returns the resulting plan once the
+    /// fitness accepts it. Returns null when no such move exists or none of them wins its comparison —
+    /// that is the pass's termination condition and its no-op proof in a short-supply run.
     /// </summary>
-    /// <param name="tokens">Working copy of the plan; owners are rewritten in place</param>
-    /// <param name="hours">Hours per agent including surcharges; kept in sync with the moves</param>
+    /// <param name="current">Plan every candidate is compared against; the state of the accepted moves so far</param>
+    /// <param name="tokens">Working copy of the plan; owners are rewritten once a move is accepted</param>
+    /// <param name="hours">Hours per agent including surcharges; kept in sync with the accepted moves</param>
     /// <param name="context">Wizard context supplying the roster order and the rules</param>
+    /// <param name="evaluator">Fitness evaluator used as the per-move acceptance gate</param>
     /// <param name="continuation">Days that belong to an open carried-in package and may not be released</param>
-    private static bool ReturnOneShift(
+    private static CoreScenario? ReturnOneShift(
+        CoreScenario current,
         List<CoreToken> tokens,
         Dictionary<string, double> hours,
         CoreWizardContext context,
+        TokenFitnessEvaluator evaluator,
         IReadOnlySet<(string AgentId, DateOnly Date, Guid ShiftRefId)> continuation)
     {
         for (var receiverIndex = 1; receiverIndex < context.Agents.Count; receiverIndex++)
@@ -106,28 +128,72 @@ public sealed class SurplusHoursReturn
                     continue;
                 }
 
-                var index = FindReturn(
-                    donor, donorHours, receiver, receiverTokens, receiverDays, tokens, context, continuation);
-                if (index < 0)
+                foreach (var index in RankedReturns(
+                    donor, donorHours, receiver, receiverTokens, receiverDays, tokens, context, continuation))
                 {
-                    continue;
+                    var accepted = TryReturn(current, tokens, hours, context, evaluator, index, receiver);
+                    if (accepted is not null)
+                    {
+                        return accepted;
+                    }
                 }
-
-                Handover(tokens, hours, index, receiver);
-                return true;
             }
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
-    /// Index of the token the donor should hand back, or -1 when it holds no shift the receiver may
-    /// legally take while the donor stays at or above its own guarantee. Candidate ranking is the one
-    /// the top-down handover uses: least damage to the receiver's package first, then the donor's
-    /// shortest block, then the earliest shift.
+    /// Builds the plan in which the given shift belongs to the receiver and returns it when the fitness
+    /// prefers it over the current one, otherwise null. Only an accepted move is written back into the
+    /// working state, so a rejected candidate leaves nothing behind.
     /// </summary>
-    private static int FindReturn(
+    /// <param name="current">Plan the candidate is compared against</param>
+    /// <param name="tokens">Working copy of the plan; only touched once the candidate is accepted</param>
+    /// <param name="hours">Hours per agent including surcharges; only touched once the candidate is accepted</param>
+    /// <param name="context">Wizard context supplying the roster order and the rules</param>
+    /// <param name="evaluator">Fitness evaluator used as the acceptance gate</param>
+    /// <param name="index">Position of the shift inside the working copy</param>
+    /// <param name="receiver">Agent that would take the shift over</param>
+    private static CoreScenario? TryReturn(
+        CoreScenario current,
+        List<CoreToken> tokens,
+        Dictionary<string, double> hours,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator,
+        int index,
+        CoreAgent receiver)
+    {
+        var token = tokens[index];
+        var surcharges = SurchargeEstimator.Estimate(
+            token.TotalHours, token.ShiftTypeIndex, token.Date, receiver);
+        var moved = token with { AgentId = receiver.Id, Surcharges = surcharges };
+
+        var candidateTokens = new List<CoreToken>(tokens) { [index] = moved };
+        var candidate = TokenSwapMutation.CloneScenario(current, candidateTokens);
+
+        evaluator.Evaluate(candidate, context);
+        if (evaluator.Compare(candidate, current) >= 0)
+        {
+            return null;
+        }
+
+        hours[token.AgentId] = hours.GetValueOrDefault(token.AgentId, 0)
+            - (double)(token.TotalHours + token.Surcharges);
+        hours[receiver.Id] = hours.GetValueOrDefault(receiver.Id, 0)
+            + (double)(token.TotalHours + surcharges);
+        tokens[index] = moved;
+
+        return candidate;
+    }
+
+    /// <summary>
+    /// Positions of the shifts the donor may hand to this receiver, best candidate first, or an empty
+    /// sequence when it holds none that the receiver may legally take while the donor stays at or above
+    /// its own guarantee. The ranking is the one the top-down handover uses: least damage to the
+    /// receiver's package first, then the donor's shortest block, then the earliest shift.
+    /// </summary>
+    private static IEnumerable<int> RankedReturns(
         CoreAgent donor,
         double donorHours,
         CoreAgent receiver,
@@ -138,11 +204,7 @@ public sealed class SurplusHoursReturn
         IReadOnlySet<(string AgentId, DateOnly Date, Guid ShiftRefId)> continuation)
     {
         var donorDays = HandoverGeometry.BuildOccupiedDays(tokens, donor.Id, context);
-
-        var bestIndex = -1;
-        var bestPenalty = int.MaxValue;
-        var bestBlockLength = int.MaxValue;
-        CoreToken bestToken = default!;
+        var candidates = new List<(int Index, int Penalty, int BlockLength, CoreToken Token)>();
 
         for (var i = 0; i < tokens.Count; i++)
         {
@@ -177,38 +239,21 @@ public sealed class SurplusHoursReturn
                 continue;
             }
 
-            var penalty = HandoverGeometry.ReceiverPenalty(receiverDays, token);
-            var blockLength = HandoverGeometry.BlockLengthAt(donorDays, token.Date);
-
-            if (bestIndex < 0
-                || penalty < bestPenalty
-                || (penalty == bestPenalty && blockLength < bestBlockLength)
-                || (penalty == bestPenalty && blockLength == bestBlockLength
-                    && HandoverGeometry.IsEarlier(token, bestToken)))
-            {
-                bestIndex = i;
-                bestPenalty = penalty;
-                bestBlockLength = blockLength;
-                bestToken = token;
-            }
+            candidates.Add((
+                i,
+                HandoverGeometry.ReceiverPenalty(receiverDays, token),
+                HandoverGeometry.BlockLengthAt(donorDays, token.Date),
+                token));
         }
 
-        return bestIndex;
-    }
-
-    private static void Handover(
-        List<CoreToken> tokens, Dictionary<string, double> hours, int index, CoreAgent receiver)
-    {
-        var token = tokens[index];
-        var surcharges = SurchargeEstimator.Estimate(
-            token.TotalHours, token.ShiftTypeIndex, token.Date, receiver);
-
-        hours[token.AgentId] = hours.GetValueOrDefault(token.AgentId, 0)
-            - (double)(token.TotalHours + token.Surcharges);
-        hours[receiver.Id] = hours.GetValueOrDefault(receiver.Id, 0)
-            + (double)(token.TotalHours + surcharges);
-
-        tokens[index] = token with { AgentId = receiver.Id, Surcharges = surcharges };
+        return candidates
+            .OrderBy(c => c.Penalty)
+            .ThenBy(c => c.BlockLength)
+            .ThenBy(c => c.Token.Date)
+            .ThenBy(c => c.Token.StartAt)
+            .ThenBy(c => c.Token.ShiftRefId)
+            .Select(c => c.Index)
+            .ToList();
     }
 
     private static List<CoreToken> TokensOf(IReadOnlyList<CoreToken> tokens, string agentId)

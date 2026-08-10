@@ -494,13 +494,13 @@ public sealed class TokenEvolutionLoop
     /// <summary>
     /// Hands surplus hours back down the roster on the current best plan (rule 5, the way back: an
     /// agent above its guarantee returns a shift to a worse rank that is still below its own). Like
-    /// the handover the pass rewrites owners only, and it is kept only when it wins the lexicographic
-    /// stage comparison. It carries its own gate on purpose: a return that the comparison rejects must
-    /// not drag the useful handover result of the same generation down with it.
+    /// the handover the pass rewrites owners only. The acceptance gate sits inside the pass, on every
+    /// single move: a bundle gate would let one rejected move discard all the legal ones with it, so
+    /// what arrives here is already the product of moves that each won their own comparison.
     /// </summary>
     /// <param name="scenario">Current best plan of the generation</param>
     /// <param name="context">Wizard context supplying the roster order and the rules</param>
-    /// <param name="evaluator">Stage evaluator deciding whether the rebalanced plan is kept</param>
+    /// <param name="evaluator">Stage evaluator gating every single return</param>
     /// <param name="alreadyOffered">Plans the pass has already seen; a deterministic pass repeated on the same plan cannot find anything new</param>
     /// <param name="trace">Optional trace sink</param>
     private CoreScenario RunSurplusHoursReturn(
@@ -515,16 +515,9 @@ public sealed class TokenEvolutionLoop
             return scenario;
         }
 
-        var returned = _surplusReturn.Apply(scenario, context);
+        var returned = _surplusReturn.Apply(scenario, context, evaluator);
         if (ReferenceEquals(returned, scenario))
         {
-            return scenario;
-        }
-
-        evaluator.Evaluate(returned, context);
-        if (evaluator.Compare(returned, scenario) >= 0)
-        {
-            trace?.Invoke($"Run: surplus-hours return REJECTED by compare ({CountReowned(returned, scenario)} shifts offered)");
             return scenario;
         }
 
