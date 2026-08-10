@@ -215,20 +215,22 @@ public sealed class TokenRepair : ITokenOperator
             if (TryRelocateAndFill(
                     primary, wizard, violation.ShiftRefId.Value, violation.Date.Value,
                     shiftTypeIndex, slotHours, slotStartUtc, slotEndUtc, occupiedAgents,
-                    relaxSoftRules: false, out repaired))
+                    relaxRestDays: false, out repaired))
             {
                 return true;
             }
 
-            // Coverage outranks the soft package rules: when neither a strict fill nor a one-move
-            // relocation exists, retry with MaxWorkDays/MinRestDays relaxed — every hard rule
-            // (bans, rest hours, consecutive-days cap, collisions) still gates the candidate. The
-            // relaxed one-move relocation is the last resort of the escalation.
+            // Coverage outranks the free block between two packages: when neither a strict fill nor a
+            // one-move relocation exists, retry with MinRestDays relaxed — every hard rule (bans, rest
+            // hours, consecutive-days cap, collisions) and the MaxWorkDays block ideal still gate the
+            // candidate. The block ideal is deliberately NOT relaxed: a package grown past the ideal
+            // here is what the finished plan is measured on and no later operator shortens it again.
+            // The relaxed one-move relocation is the last resort of the escalation.
             candidates = wizard.Agents
                 .Where(agent => !occupiedAgents.Contains(agent.Id)
                     && SlotConstraintFilter.IsValidAssignment(
                         agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours,
-                        wizard, primary.Tokens, slotStartUtc, slotEndUtc, relaxSoftRules: true))
+                        wizard, primary.Tokens, slotStartUtc, slotEndUtc, relaxRestDays: true))
                 .ToList();
 
             if (candidates.Count == 0)
@@ -236,7 +238,7 @@ public sealed class TokenRepair : ITokenOperator
                 return TryRelocateAndFill(
                     primary, wizard, violation.ShiftRefId.Value, violation.Date.Value,
                     shiftTypeIndex, slotHours, slotStartUtc, slotEndUtc, occupiedAgents,
-                    relaxSoftRules: true, out repaired);
+                    relaxRestDays: true, out repaired);
             }
         }
 
@@ -282,7 +284,7 @@ public sealed class TokenRepair : ITokenOperator
         DateTime slotStartUtc,
         DateTime slotEndUtc,
         IReadOnlySet<string> occupiedAgents,
-        bool relaxSoftRules,
+        bool relaxRestDays,
         out CoreScenario repaired)
     {
         repaired = primary;
@@ -309,13 +311,13 @@ public sealed class TokenRepair : ITokenOperator
             {
                 if (TryMoveBlockersAndFill(
                         primary, wizard, agent, [blocker], slotDate, shiftTypeIndex, shiftRefId,
-                        slotHours, slotStartUtc, slotEndUtc, relaxSoftRules, out repaired))
+                        slotHours, slotStartUtc, slotEndUtc, relaxRestDays, out repaired))
                 {
                     return true;
                 }
             }
 
-            if (!relaxSoftRules)
+            if (!relaxRestDays)
             {
                 continue;
             }
@@ -329,7 +331,7 @@ public sealed class TokenRepair : ITokenOperator
                 {
                     if (TryMoveBlockersAndFill(
                             primary, wizard, agent, [blockers[i], blockers[j]], slotDate, shiftTypeIndex,
-                            shiftRefId, slotHours, slotStartUtc, slotEndUtc, relaxSoftRules, out repaired))
+                            shiftRefId, slotHours, slotStartUtc, slotEndUtc, relaxRestDays, out repaired))
                     {
                         return true;
                     }
@@ -356,7 +358,7 @@ public sealed class TokenRepair : ITokenOperator
         decimal slotHours,
         DateTime slotStartUtc,
         DateTime slotEndUtc,
-        bool relaxSoftRules,
+        bool relaxRestDays,
         out CoreScenario repaired)
     {
         repaired = primary;
@@ -365,14 +367,14 @@ public sealed class TokenRepair : ITokenOperator
 
         if (!SlotConstraintFilter.IsValidAssignment(
                 agent, slotDate, shiftTypeIndex, shiftRefId, slotHours,
-                wizard, working, slotStartUtc, slotEndUtc, relaxSoftRules))
+                wizard, working, slotStartUtc, slotEndUtc, relaxRestDays))
         {
             return false;
         }
 
         foreach (var blocker in blockers)
         {
-            var receiver = FindRelocationReceiver(agent, blocker, working, wizard, relaxSoftRules);
+            var receiver = FindRelocationReceiver(agent, blocker, working, wizard, relaxRestDays);
             if (receiver is null)
             {
                 return false;
@@ -488,7 +490,7 @@ public sealed class TokenRepair : ITokenOperator
         CoreToken blocker,
         IReadOnlyList<CoreToken> stateTokens,
         CoreWizardContext wizard,
-        bool relaxSoftRules)
+        bool relaxRestDays)
     {
         var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var token in stateTokens)
@@ -524,7 +526,7 @@ public sealed class TokenRepair : ITokenOperator
             if (SlotConstraintFilter.IsValidAssignment(
                     candidate, blocker.Date, blocker.ShiftTypeIndex, blocker.ShiftRefId,
                     blocker.TotalHours, wizard, stateTokens, blocker.StartAt, blocker.EndAt,
-                    relaxSoftRules))
+                    relaxRestDays))
             {
                 return candidate;
             }

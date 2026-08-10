@@ -5,6 +5,7 @@ using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
+using Klacks.ScheduleOptimizer.TokenEvolution.Diagnostics;
 using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 using Klacks.ScheduleOptimizer.TokenEvolution.Operators;
@@ -20,6 +21,21 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution;
 public sealed class TokenEvolutionLoop
 {
     private const int SequentialParallelism = 1;
+
+    private const string CrossoverStage = "crossover";
+    private const string SweepBeforePassesStage = "sweep1";
+    private const string HandoverStage = "handover";
+    private const string SurplusReturnStage = "surplusReturn";
+    private const string KindBalanceStage = "kindBalance";
+    private const string OrderBalanceStage = "orderBalance";
+    private const string SweepAfterPassesStage = "sweep2";
+
+    private const string SwapStage = "mutation.swap";
+    private const string SplitStage = "mutation.split";
+    private const string MergeStage = "mutation.merge";
+    private const string ReassignStage = "mutation.reassign";
+    private const string RepairStage = "mutation.repair";
+    private const string NoMutationStage = "mutation.none";
 
     private readonly TokenPopulationBuilder _populationBuilder;
     private readonly BlockCrossover _crossover;
@@ -70,12 +86,26 @@ public sealed class TokenEvolutionLoop
             new TokenRepair(realChecker));
     }
 
+    /// <summary>
+    /// Evolves a plan for the given context.
+    /// </summary>
+    /// <param name="context">Wizard context: agents, shifts, rules and the works outside the genome</param>
+    /// <param name="config">Population size, generation cap, seed, operator weights and budgets</param>
+    /// <param name="progress">Optional per-generation progress sink</param>
+    /// <param name="cancellationToken">Cancels the run between generations and inside the sweeps</param>
+    /// <param name="trace">Optional textual trace of the run's phases and timings</param>
+    /// <param name="blockDiagnostics">
+    /// Optional sink for <see cref="OverlongBlockTrace"/>: when set, every step that produces a plan is
+    /// compared with its input and each newly created overlong package is reported with the step that
+    /// built it. Null keeps the whole comparison out of the run.
+    /// </param>
     public CoreScenario Run(
         CoreWizardContext context,
         TokenEvolutionConfig config,
         IProgress<TokenEvolutionProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        Action<string>? trace = null)
+        Action<string>? trace = null,
+        Action<string>? blockDiagnostics = null)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         trace?.Invoke($"Run: enter (population={config.PopulationSize}, maxGen={config.MaxGenerations}, agents={context.Agents.Count}, shifts={context.Shifts.Count}, lockedWorks={context.LockedWorks.Count})");
@@ -88,6 +118,14 @@ public sealed class TokenEvolutionLoop
             .BuildPopulation(context, config.PopulationSize, rng, cancellationToken, trace, config.InitAuctionRatio, config.InitWarmStartRatio)
             .ToList();
         trace?.Invoke($"Run: BuildPopulation done in {sw.ElapsedMilliseconds - t0}ms ({population.Count} scenarios)");
+        if (blockDiagnostics is not null)
+        {
+            for (var index = 0; index < population.Count; index++)
+            {
+                OverlongBlockTrace.Report(blockDiagnostics, $"init[{index}]", null, population[index], context);
+            }
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
 
         t0 = sw.ElapsedMilliseconds;
@@ -130,13 +168,22 @@ public sealed class TokenEvolutionLoop
                 var p1 = TournamentSelect(population, config.TournamentK, evaluator, rng);
                 var p2 = TournamentSelect(population, config.TournamentK, evaluator, rng);
 
-                var child = rng.NextDouble() < config.CrossoverRate
+                var crossed = rng.NextDouble() < config.CrossoverRate;
+                var child = crossed
                     ? _crossover.Apply(new TokenOperatorContext(p1, p2, context, rng))
                     : CloneScenario(p1);
+                if (crossed && blockDiagnostics is not null)
+                {
+                    OverlongBlockTrace.Report(
+                        blockDiagnostics, $"gen{generation}.{CrossoverStage}", p1, p2, child, context);
+                }
 
                 if (rng.NextDouble() < config.MutationRate)
                 {
-                    child = ApplyWeightedMutation(child, context, rng, config);
+                    var parent = child;
+                    var (mutated, operatorName) = ApplyWeightedMutation(child, context, rng, config);
+                    child = mutated;
+                    ReportOverlong(blockDiagnostics, generation, operatorName, parent, child, context);
                 }
 
                 children.Add(child);
@@ -150,15 +197,31 @@ public sealed class TokenEvolutionLoop
 
             var sweepStart = sw.ElapsedMilliseconds;
             var preSweep = currentBest;
+            var beforePass = currentBest;
             currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
+            ReportOverlong(blockDiagnostics, generation, SweepBeforePassesStage, beforePass, currentBest, context);
+
+            beforePass = currentBest;
             currentBest = RunTopDownHandover(currentBest, context, evaluator, handoverSeen, trace);
+            ReportOverlong(blockDiagnostics, generation, HandoverStage, beforePass, currentBest, context);
+
+            beforePass = currentBest;
             currentBest = RunSurplusHoursReturn(currentBest, context, evaluator, surplusReturnSeen, trace);
+            ReportOverlong(blockDiagnostics, generation, SurplusReturnStage, beforePass, currentBest, context);
+
+            beforePass = currentBest;
             currentBest = RunShiftKindBalance(currentBest, context, evaluator, balanceSeen, trace);
+            ReportOverlong(blockDiagnostics, generation, KindBalanceStage, beforePass, currentBest, context);
+
+            beforePass = currentBest;
             currentBest = RunObjectContinuityBalance(currentBest, context, evaluator, orderBalanceSeen, trace);
+            ReportOverlong(blockDiagnostics, generation, OrderBalanceStage, beforePass, currentBest, context);
 
             // The handover and balance passes reshape blocks, which can open a legal fill for a slot
             // the first sweep had to skip — one more sweep catches it in the same generation.
+            beforePass = currentBest;
             currentBest = RunCoverageSweep(currentBest, context, rng, evaluator, cancellationToken, trace);
+            ReportOverlong(blockDiagnostics, generation, SweepAfterPassesStage, beforePass, currentBest, context);
             if (!ReferenceEquals(currentBest, preSweep))
             {
                 EliteInjector.ReplaceWorst(population, currentBest, evaluator);
@@ -202,14 +265,22 @@ public sealed class TokenEvolutionLoop
         return best;
     }
 
-    private CoreScenario ApplyWeightedMutation(
+    /// <summary>
+    /// Applies one mutation drawn from the configured weights and names the operator that ran, so a
+    /// diagnostics sink can attribute a structural defect to the operator instead of to the generation.
+    /// </summary>
+    /// <param name="child">Plan to mutate</param>
+    /// <param name="context">Wizard context handed to the operator</param>
+    /// <param name="rng">Random source of the run; the draw happens here and nowhere else</param>
+    /// <param name="config">Supplies the five mutation weights</param>
+    private (CoreScenario Scenario, string Operator) ApplyWeightedMutation(
         CoreScenario child, CoreWizardContext context, Random rng, TokenEvolutionConfig config)
     {
         var total = config.MutationWeightSwap + config.MutationWeightSplit + config.MutationWeightMerge
                     + config.MutationWeightReassign + config.MutationWeightRepair;
         if (total <= 0)
         {
-            return child;
+            return (child, NoMutationStage);
         }
 
         var pick = rng.NextDouble() * total;
@@ -218,28 +289,54 @@ public sealed class TokenEvolutionLoop
         cumulative += config.MutationWeightSwap;
         if (pick < cumulative)
         {
-            return _swap.Apply(new TokenOperatorContext(child, null, context, rng));
+            return (_swap.Apply(new TokenOperatorContext(child, null, context, rng)), SwapStage);
         }
 
         cumulative += config.MutationWeightSplit;
         if (pick < cumulative)
         {
-            return _split.Apply(new TokenOperatorContext(child, null, context, rng));
+            return (_split.Apply(new TokenOperatorContext(child, null, context, rng)), SplitStage);
         }
 
         cumulative += config.MutationWeightMerge;
         if (pick < cumulative)
         {
-            return _merge.Apply(new TokenOperatorContext(child, null, context, rng));
+            return (_merge.Apply(new TokenOperatorContext(child, null, context, rng)), MergeStage);
         }
 
         cumulative += config.MutationWeightReassign;
         if (pick < cumulative)
         {
-            return _reassign.Apply(new TokenOperatorContext(child, null, context, rng));
+            return (_reassign.Apply(new TokenOperatorContext(child, null, context, rng)), ReassignStage);
         }
 
-        return _repair.Apply(new TokenOperatorContext(child, null, context, rng));
+        return (_repair.Apply(new TokenOperatorContext(child, null, context, rng)), RepairStage);
+    }
+
+    /// <summary>
+    /// Forwards one evolution step to <see cref="OverlongBlockTrace"/>. The stage name is only built
+    /// when a sink exists, so a run without diagnostics pays a single null check per step.
+    /// </summary>
+    /// <param name="sink">Diagnostics sink; null skips everything</param>
+    /// <param name="generation">Generation the step belongs to</param>
+    /// <param name="pass">Name of the step</param>
+    /// <param name="before">Plan the step started from</param>
+    /// <param name="after">Plan the step produced</param>
+    /// <param name="context">Wizard context supplying MaxWorkDays and the works outside the genome</param>
+    private static void ReportOverlong(
+        Action<string>? sink,
+        int generation,
+        string pass,
+        CoreScenario before,
+        CoreScenario after,
+        CoreWizardContext context)
+    {
+        if (sink is null)
+        {
+            return;
+        }
+
+        OverlongBlockTrace.Report(sink, $"gen{generation}.{pass}", before, after, context);
     }
 
     private static CoreScenario TournamentSelect(
