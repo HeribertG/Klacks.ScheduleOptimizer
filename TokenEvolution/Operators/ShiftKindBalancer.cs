@@ -7,16 +7,26 @@ using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 
 /// <summary>
-/// Hour-neutral shift-kind rebalancing: swaps two work blocks of different kinds between two agents
-/// when both blocks cover exactly the same calendar days. Both agents keep every worked day and every
-/// hour, so guaranteed-hours and coverage stages are untouched — the swap can only trade the KIND
-/// distribution, which is what the shift-kind fairness rule asks for. Each candidate swap is gated by
-/// the full assignment filter on both sides (bans, keywords, rest hours at the block edges, daily
-/// caps) and then by one of two acceptance paths: the lexicographic fitness improves strictly, or
-/// <see cref="ParetoFairnessGate"/> confirms that the fairness rises while no numbered rule from 1 to 8
-/// moves the wrong way. A swap can therefore never buy fairness with a rotation, package-constancy or
-/// legality regression, but it may cost order loyalty (rule 10) or an unnumbered helper term, both of
-/// which the priority order places below fairness.
+/// Hour-neutral shift-kind rebalancing: swaps work of different kinds between two agents on the
+/// calendar days their two blocks have in common. Both agents keep every worked day, so ONE swap leaves
+/// the package structure — package count, package lengths, the overlong and the short-package share —
+/// exactly as it was and moves only the KIND distribution, which is what the shift-kind fairness rule
+/// asks for. That invariance holds per swap, not for the finished plan: the balanced elite re-enters the
+/// population, so the search takes a different path afterwards and the end plan's package lengths do
+/// move. Every candidate is gated by the full assignment filter on both sides (bans, keywords, rest
+/// hours at the block edges, daily caps) and then by an acceptance path that depends on how much of the
+/// two blocks the swap covers.
+/// <para>
+/// A FULL swap — the two blocks cover exactly the same days — replaces a whole kind block by one of the
+/// same days and can therefore never leave a package holding two kinds. It keeps both historic
+/// acceptance paths: the lexicographic fitness improves strictly, or <see cref="ParetoFairnessGate"/>
+/// confirms that the fairness rises while no numbered rule from 1 to 8 moves the wrong way. A PARTIAL
+/// swap reaches inside a package and can break its kind constancy, which the gate's own rule-7 counter
+/// prices. It is accepted through the Pareto gate alone, and it additionally requires the two exchanged
+/// tokens of a day to carry the same hours, so no agent's daily or weekly hours move. The lexicographic
+/// path is denied to partial swaps on purpose: it aggregates the block ordering with helper terms that
+/// carry no rule number and would let a location gain pay for a broken package, against rule 7.
+/// </para>
 /// <para>
 /// Deterministic by construction: no random source, candidate pairs are walked in roster order and
 /// block start order, first improvement wins, bounded by a fixed swap budget.
@@ -28,8 +38,8 @@ public sealed class ShiftKindBalancer
     private const int MaxSwaps = 24;
 
     /// <summary>
-    /// Returns a scenario with strictly better fitness produced by same-day block-kind swaps, or the
-    /// unchanged input when no improving swap exists.
+    /// Returns a scenario with strictly better fitness produced by kind swaps on shared calendar days,
+    /// or the unchanged input when no improving swap exists.
     /// </summary>
     /// <param name="scenario">Plan to rebalance; never modified</param>
     /// <param name="context">Wizard context supplying the roster, the rules and the ban list</param>
@@ -77,14 +87,14 @@ public sealed class ShiftKindBalancer
                     var agentB = context.Agents[b];
                     foreach (var blockB in blocksByAgent[agentB.Id])
                     {
-                        if (blockB.Kind == blockA.Kind
-                            || blockB.FirstDay != blockA.FirstDay
-                            || blockB.Tokens.Count != blockA.Tokens.Count)
+                        var overlap = SharedDays(blockA, blockB);
+                        if (overlap is null)
                         {
                             continue;
                         }
 
-                        var candidate = TrySwap(scenario, context, agentA, blockA, agentB, blockB);
+                        var candidate = TrySwap(
+                            scenario, context, agentA, overlap.FromA, agentB, overlap.FromB);
                         if (candidate is null)
                         {
                             continue;
@@ -96,8 +106,11 @@ public sealed class ShiftKindBalancer
                         }
 
                         var proposed = ParetoFairnessGate.SnapshotOf(candidate, context, evaluator);
-                        if (evaluator.Compare(candidate, scenario) < 0
-                            || ParetoFairnessGate.Accepts(current, proposed))
+                        var accepted = overlap.CoversBothBlocks
+                            ? evaluator.Compare(candidate, scenario) < 0
+                                || ParetoFairnessGate.Accepts(current, proposed)
+                            : ParetoFairnessGate.Accepts(current, proposed);
+                        if (accepted)
                         {
                             return candidate;
                         }
@@ -110,24 +123,68 @@ public sealed class ShiftKindBalancer
     }
 
     /// <summary>
-    /// Builds the swap result when every token of both blocks passes the assignment filter for its new
-    /// owner, otherwise null. The filter runs against the plan with both blocks removed plus the tokens
-    /// already re-owned, so rest-hour checks see the growing swapped state.
+    /// The two token runs the swap would exchange, or null when the blocks share no day, hold the same
+    /// kind, or — for a partial overlap — pair a day whose two tokens differ in hours. Both blocks are
+    /// gap-free runs of one token per day, so their shared days are the contiguous range between the
+    /// later start and the earlier end and both sides hold equally many tokens.
+    /// </summary>
+    /// <param name="blockA">Kind-pure run of the first agent</param>
+    /// <param name="blockB">Kind-pure run of the second agent</param>
+    private static SharedDayRange? SharedDays(KindBlock blockA, KindBlock blockB)
+    {
+        if (blockA.Kind == blockB.Kind)
+        {
+            return null;
+        }
+
+        var first = blockA.FirstDay > blockB.FirstDay ? blockA.FirstDay : blockB.FirstDay;
+        var last = blockA.LastDay < blockB.LastDay ? blockA.LastDay : blockB.LastDay;
+        var length = last.DayNumber - first.DayNumber + 1;
+        if (length <= 0)
+        {
+            return null;
+        }
+
+        var coversBoth = length == blockA.Tokens.Count && length == blockB.Tokens.Count;
+        var offsetA = first.DayNumber - blockA.FirstDay.DayNumber;
+        var offsetB = first.DayNumber - blockB.FirstDay.DayNumber;
+        var fromA = new List<CoreToken>(length);
+        var fromB = new List<CoreToken>(length);
+        for (var i = 0; i < length; i++)
+        {
+            var tokenA = blockA.Tokens[offsetA + i];
+            var tokenB = blockB.Tokens[offsetB + i];
+            if (!coversBoth && tokenA.TotalHours != tokenB.TotalHours)
+            {
+                return null;
+            }
+
+            fromA.Add(tokenA);
+            fromB.Add(tokenB);
+        }
+
+        return new SharedDayRange(fromA, fromB, coversBoth);
+    }
+
+    /// <summary>
+    /// Builds the swap result when every exchanged token passes the assignment filter for its new owner,
+    /// otherwise null. The filter runs against the plan with both runs removed plus the tokens already
+    /// re-owned, so rest-hour checks see the growing swapped state.
     /// </summary>
     private static CoreScenario? TrySwap(
         CoreScenario scenario,
         CoreWizardContext context,
         CoreAgent agentA,
-        KindBlock blockA,
+        List<CoreToken> fromA,
         CoreAgent agentB,
-        KindBlock blockB)
+        List<CoreToken> fromB)
     {
-        var removed = new HashSet<CoreToken>(blockA.Tokens);
-        removed.UnionWith(blockB.Tokens);
+        var removed = new HashSet<CoreToken>(fromA);
+        removed.UnionWith(fromB);
         var working = scenario.Tokens.Where(t => !removed.Contains(t)).ToList();
 
-        foreach (var (token, receiver) in blockB.Tokens.Select(t => (t, agentA))
-                     .Concat(blockA.Tokens.Select(t => (t, agentB)))
+        foreach (var (token, receiver) in fromB.Select(t => (t, agentA))
+                     .Concat(fromA.Select(t => (t, agentB)))
                      .OrderBy(p => p.t.Date)
                      .ThenBy(p => p.t.StartAt))
         {
@@ -189,7 +246,7 @@ public sealed class ShiftKindBalancer
                 && run.All(t => !t.IsLocked)
                 && !boundaryDays.Contains(run[0].Date.AddDays(-1)))
             {
-                blocks.Add(new KindBlock(run[0].ShiftTypeIndex, run[0].Date, run.ToList()));
+                blocks.Add(new KindBlock(run[0].ShiftTypeIndex, run[0].Date, run[^1].Date, run.ToList()));
             }
 
             run.Clear();
@@ -226,5 +283,7 @@ public sealed class ShiftKindBalancer
         return blocks;
     }
 
-    private sealed record KindBlock(int Kind, DateOnly FirstDay, List<CoreToken> Tokens);
+    private sealed record KindBlock(int Kind, DateOnly FirstDay, DateOnly LastDay, List<CoreToken> Tokens);
+
+    private sealed record SharedDayRange(List<CoreToken> FromA, List<CoreToken> FromB, bool CoversBothBlocks);
 }

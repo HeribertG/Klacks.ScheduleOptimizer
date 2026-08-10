@@ -13,6 +13,11 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// <param name="Blacklist">Share of tokens off a blacklisted shift (owner decision B2); higher is better</param>
 /// <param name="ShiftKindFairness">Evenness of the shift kinds over the eligible agents (rule 9); higher is better</param>
 /// <param name="OverlongPackages">Packages longer than the agent's MaxWorkDays (rule 6); lower is better</param>
+/// <param name="MixedPackages">
+/// Packages holding more than one shift kind (rule 7); lower is better. Read separately from
+/// <paramref name="BlockOrder"/>, which averages rule 7 with the rotation of rule 8 and would let the
+/// lower-ranked rule pay for the higher one.
+/// </param>
 public readonly record struct ParetoGateSnapshot(
     int Legality,
     int Stage0,
@@ -21,4 +26,5 @@ public readonly record struct ParetoGateSnapshot(
     double BlockOrder,
     double Blacklist,
     double ShiftKindFairness,
-    int OverlongPackages);
+    int OverlongPackages,
+    int MixedPackages);

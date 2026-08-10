@@ -20,7 +20,10 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// </para>
 /// <para>
 /// Rule 6 has no fitness representation, so the overlong-package count enters the snapshot explicitly
-/// rather than through a stage.
+/// rather than through a stage. Rule 7 has one, but only inside an average: the block-ordering component
+/// mixes the package constancy of rule 7 with the rotation of rule 8, so a move that breaks a package
+/// and rotates better can leave it standing still. Rule 7 outranks rule 8, so the count of packages
+/// holding two kinds enters the snapshot on its own as well.
 /// </para>
 /// </summary>
 public static class ParetoFairnessGate
@@ -45,7 +48,8 @@ public static class ParetoFairnessGate
             BlockOrder: detailed.Stage3Components.BlockOrder,
             Blacklist: detailed.Stage3Components.Blacklist,
             ShiftKindFairness: detailed.Stage4Components.ShiftKindFairness,
-            OverlongPackages: OverlongBlockTrace.Overlong(plan, context).Count);
+            OverlongPackages: OverlongBlockTrace.Overlong(plan, context).Count,
+            MixedPackages: MixedKindPackageTrace.Count(plan));
     }
 
     /// <summary>
@@ -62,5 +66,6 @@ public static class ParetoFairnessGate
             && candidate.Stage2 >= current.Stage2
             && candidate.BlockOrder >= current.BlockOrder
             && candidate.Blacklist >= current.Blacklist
-            && candidate.OverlongPackages <= current.OverlongPackages;
+            && candidate.OverlongPackages <= current.OverlongPackages
+            && candidate.MixedPackages <= current.MixedPackages;
 }
