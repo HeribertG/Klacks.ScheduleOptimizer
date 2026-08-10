@@ -414,11 +414,19 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// Scores the shift-type rotation rule (early → late → night). Blocks are maximal runs of
     /// consecutive working dates per agent — token BlockIds are NOT used because every token
     /// created by the auction, coverage strategy and repair carries its own fresh BlockId, which
-    /// made the old per-BlockId grouping evaluate nothing. Inside a block, backwards transitions
-    /// (late → early etc.) are violations. Across blocks the schedule must rotate: starting the
-    /// next block with the same type as the previous block is a full violation, the cycle-next
-    /// type is ideal, any other change costs half. Agents without PerformsShiftWork are exempt —
-    /// they may only work day shifts and must not be punished for repeating them.
+    /// made the old per-BlockId grouping evaluate nothing. Inside a block every day that departs
+    /// from the block's starting type is a violation, which is the fitness advocate of the rule
+    /// "the shift type stays constant inside one package" — measuring only backwards steps rated
+    /// early → late → night inside a single block as flawless. Across blocks the schedule must
+    /// rotate: starting the next block with the same type as the previous block is a full
+    /// violation, the cycle-next type is ideal, any other change costs half. Agents without
+    /// PerformsShiftWork are exempt — they may only work day shifts and must not be punished for
+    /// repeating them.
+    /// <para>
+    /// The comparison runs over calendar DAYS, not tokens: two non-overlapping shifts on one day
+    /// are an explicitly permitted split duty, and a token-wise comparison would book that
+    /// permission as a rotation violation. A day is represented by the type of its earliest shift.
+    /// </para>
     /// </summary>
     private static double ComputeBlockOrderingScore(CoreScenario scenario, CoreWizardContext context)
     {
@@ -441,23 +449,14 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 continue;
             }
 
-            var ordered = perAgent.OrderBy(t => t.Date).ThenBy(t => t.StartAt).ToList();
-            var blocks = new List<List<CoreToken>>();
-            foreach (var token in ordered)
-            {
-                if (blocks.Count == 0 || token.Date.DayNumber - blocks[^1][^1].Date.DayNumber > 1)
-                {
-                    blocks.Add([]);
-                }
-                blocks[^1].Add(token);
-            }
+            var blocks = BuildDayBlocks(perAgent);
 
             foreach (var block in blocks)
             {
                 for (var i = 1; i < block.Count; i++)
                 {
                     units++;
-                    if (block[i].ShiftTypeIndex < block[i - 1].ShiftTypeIndex)
+                    if (block[i] != block[0])
                     {
                         violations++;
                     }
@@ -467,8 +466,8 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             for (var b = 1; b < blocks.Count; b++)
             {
                 units++;
-                var previousType = blocks[b - 1][0].ShiftTypeIndex;
-                var nextType = blocks[b][0].ShiftTypeIndex;
+                var previousType = blocks[b - 1][0];
+                var nextType = blocks[b][0];
                 if (nextType == previousType)
                 {
                     violations += 1.0;
@@ -481,6 +480,35 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         }
 
         return units == 0 ? 1 : 1.0 - (violations / units);
+    }
+
+    /// <summary>
+    /// Maximal runs of consecutive worked calendar days of one agent, each day reduced to the shift
+    /// type of its earliest shift.
+    /// </summary>
+    /// <param name="agentTokens">Every token of one agent</param>
+    private static List<List<int>> BuildDayBlocks(IEnumerable<CoreToken> agentTokens)
+    {
+        var kindByDay = new Dictionary<DateOnly, int>();
+        foreach (var token in agentTokens.OrderBy(t => t.Date).ThenBy(t => t.StartAt))
+        {
+            kindByDay.TryAdd(token.Date, token.ShiftTypeIndex);
+        }
+
+        var blocks = new List<List<int>>();
+        DateOnly? previousDay = null;
+        foreach (var day in kindByDay.Keys.OrderBy(d => d))
+        {
+            if (previousDay is null || day.DayNumber - previousDay.Value.DayNumber > 1)
+            {
+                blocks.Add([]);
+            }
+
+            blocks[^1].Add(kindByDay[day]);
+            previousDay = day;
+        }
+
+        return blocks;
     }
 
     private static double ComputeBlacklistScore(CoreScenario scenario, CoreWizardContext context)
