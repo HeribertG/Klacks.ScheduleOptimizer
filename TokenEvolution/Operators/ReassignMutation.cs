@@ -10,8 +10,11 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// Index-aware (top-down roster rule): receivers still below their guaranteed hours are
 /// preferred top-first so the top of the roster reaches its target; once every valid receiver
 /// is at or above target the token drifts to the bottom of the roster, keeping the top
-/// accurate ("the bottom eats what is left"). Most aggressive operator; used sparingly via
-/// MutationWeights.
+/// accurate ("the bottom eats what is left"). Package-aware since SPEC.md decision 13: inside
+/// the accuracy group a receiver whose own shift starts on a neighbouring day is preferred, so
+/// the reassigned token extends one of their packages instead of opening a new one-day block —
+/// the mutation samples package-friendly neighbours and the fitness comparison still decides.
+/// Most aggressive operator; used sparingly via MutationWeights.
 /// </summary>
 public sealed class ReassignMutation : ITokenOperator
 {
@@ -41,7 +44,15 @@ public sealed class ReassignMutation : ITokenOperator
             return TokenSwapMutation.CloneScenario(context.Primary, tokens);
         }
 
-        var newAgent = RosterPositionBias.PickAccuracyAware(validAgents, tokensWithoutCurrent, context.Wizard.Agents, context.Rng);
+        var newAgent = RosterPositionBias.PickAccuracyAware(
+            validAgents,
+            tokensWithoutCurrent,
+            context.Wizard.Agents,
+            context.Rng,
+            agent => SlotConstraintFilter.StartsOnDate(
+                    agent.Id, currentToken.Date.AddDays(-1), tokensWithoutCurrent, context.Wizard)
+                || SlotConstraintFilter.StartsOnDate(
+                    agent.Id, currentToken.Date.AddDays(+1), tokensWithoutCurrent, context.Wizard));
         // Without re-estimating, the token would carry the PREVIOUS agent's night and weekend rates
         // into the new agent's hours account.
         tokens[chosen.Index] = currentToken with

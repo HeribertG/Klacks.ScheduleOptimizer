@@ -129,11 +129,16 @@ public sealed class TokenRepair : ITokenOperator
             var violations = _checker.Check(current, context);
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Date order is load-bearing for the package-aware fill (SPEC.md decision 13): every
+            // filled day turns its neighbour slot into an extension case for the same agent, so a
+            // stretch of open days grows back as one package instead of scattered single days.
             var pending = violations
                 .Where(v => v.Kind == ViolationKind.UnderSupply && v.ShiftRefId.HasValue && v.Date.HasValue)
                 .Select(v => (Key: (v.ShiftRefId!.Value, v.Date!.Value), Violation: v))
                 .GroupBy(x => x.Key)
                 .Select(g => g.First().Violation)
+                .OrderBy(v => v.Date!.Value)
+                .ThenBy(v => v.ShiftRefId!.Value)
                 .ToList();
 
             if (pending.Count == 0)
@@ -292,7 +297,9 @@ public sealed class TokenRepair : ITokenOperator
             return false;
         }
 
-        var chosen = RosterPositionBias.PickAccuracyAware(candidates, primary.Tokens, wizard.Agents, rng);
+        var chosen = RosterPositionBias.PickAccuracyAware(
+            candidates, primary.Tokens, wizard.Agents, rng,
+            agent => ExtendsAPackage(agent, violation.Date.Value, primary.Tokens, wizard));
         if (reached == SlotRelaxation.All)
         {
             ReportEscalation(escalations, chosen.Id, violation.Date.Value, DirectFill);
@@ -320,6 +327,24 @@ public sealed class TokenRepair : ITokenOperator
         repaired = TokenSwapMutation.CloneScenario(primary, tokens);
         return true;
     }
+
+    /// <summary>
+    /// True when one of the agent's own shifts starts on a day adjacent to the slot, so a fill would
+    /// EXTEND that package instead of opening a new one-day block. The package reading of occupancy
+    /// (start day, boundary works included) is the same one the rest check uses. Package-aware repair
+    /// of SPEC.md decision 13: the splintering the unescalatable rest caused was born here, in fills
+    /// that opened single days although an extension candidate existed.
+    /// </summary>
+    private static bool ExtendsAPackage(
+        CoreAgent agent, DateOnly slotDate, IReadOnlyList<CoreToken> tokens, CoreWizardContext wizard)
+        => SlotConstraintFilter.StartsOnDate(agent.Id, slotDate.AddDays(-1), tokens, wizard)
+            || SlotConstraintFilter.StartsOnDate(agent.Id, slotDate.AddDays(+1), tokens, wizard);
+
+    /// <summary>Stable reorder of one accuracy group: package extenders first, everyone else after.</summary>
+    private static IEnumerable<CoreAgent> PreferExtenders(
+        IReadOnlyList<CoreAgent> group, DateOnly date, IReadOnlyList<CoreToken> tokens, CoreWizardContext wizard)
+        => group.Where(a => ExtendsAPackage(a, date, tokens, wizard))
+            .Concat(group.Where(a => !ExtendsAPackage(a, date, tokens, wizard)));
 
     /// <summary>
     /// One-move escape for a slot no agent can take directly: an agent that fails only because of one
@@ -583,7 +608,12 @@ public sealed class TokenRepair : ITokenOperator
 
         surplus.Reverse();
 
-        foreach (var candidate in below.Concat(surplus))
+        // Package-aware receiver order (SPEC.md decision 13): inside each accuracy group an agent
+        // whose own shift starts next to the relocated day is tried first — the handed-over shift
+        // then extends one of their packages instead of opening a new one-day block. The accuracy
+        // order itself is untouched; rule 5 stays above the package preference.
+        foreach (var candidate in PreferExtenders(below, blocker.Date, stateTokens, wizard)
+                     .Concat(PreferExtenders(surplus, blocker.Date, stateTokens, wizard)))
         {
             if (SlotConstraintFilter.IsValidAssignment(
                     candidate, blocker.Date, blocker.ShiftTypeIndex, blocker.ShiftRefId,

@@ -39,16 +39,24 @@ public static class RosterPositionBias
     /// candidates still below their guaranteed hours receive first (top roster position
     /// preferred); once every candidate is at or above target the surplus goes to the
     /// bottom of the roster, keeping the top accurate ("the bottom eats what is left").
+    /// <para>
+    /// The optional <paramref name="preferWhere"/> narrows the chosen accuracy group to the
+    /// candidates it matches, when there are any — deliberately INSIDE the accuracy order, never
+    /// across it: rule 5 (hours flow top-down) outranks whatever the preference expresses. The
+    /// package-aware repair of SPEC.md decision 13 passes "extends an existing package" here.
+    /// </para>
     /// </summary>
     /// <param name="candidates">Valid receiving agents — must contain at least one element.</param>
     /// <param name="assignedTokens">Tokens currently assigned in the scenario (hours source).</param>
     /// <param name="roster">Authoritative ordered agent list; index 0 is top.</param>
     /// <param name="rng">RNG instance owned by the caller for reproducibility.</param>
+    /// <param name="preferWhere">Optional tie-breaking preference applied inside the accuracy group.</param>
     public static CoreAgent PickAccuracyAware(
         IReadOnlyList<CoreAgent> candidates,
         IReadOnlyList<CoreToken> assignedTokens,
         IReadOnlyList<CoreAgent> roster,
-        Random rng)
+        Random rng,
+        Func<CoreAgent, bool>? preferWhere = null)
     {
         var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var token in assignedTokens)
@@ -64,9 +72,19 @@ public static class RosterPositionBias
                 && a.CurrentHours + hoursByAgent.GetValueOrDefault(a.Id, 0) < a.GuaranteedHours)
             .ToList();
 
+        IReadOnlyList<CoreAgent> pool = belowTarget.Count > 0 ? belowTarget : candidates;
+        if (preferWhere is not null)
+        {
+            var preferred = pool.Where(preferWhere).ToList();
+            if (preferred.Count > 0)
+            {
+                pool = preferred;
+            }
+        }
+
         return belowTarget.Count > 0
-            ? PickWithTopBias(belowTarget, a => a.Id, roster, rng)
-            : PickWithBottomBias(candidates, a => a.Id, roster, rng);
+            ? PickWithTopBias(pool, a => a.Id, roster, rng)
+            : PickWithBottomBias(pool, a => a.Id, roster, rng);
     }
 
     private static T Pick<T>(

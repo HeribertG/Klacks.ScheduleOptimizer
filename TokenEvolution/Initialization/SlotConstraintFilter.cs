@@ -416,9 +416,10 @@ public static class SlotConstraintFilter
 
     /// <summary>
     /// True when a shift of the agent STARTS on the day — the package reading of occupancy, blind to
-    /// the morning end of a midnight crosser on purpose.
+    /// the morning end of a midnight crosser on purpose. Internal because the package-aware repair
+    /// (SPEC.md decision 13) asks the same question when it prefers a fill that extends a package.
     /// </summary>
-    private static bool StartsOnDate(
+    internal static bool StartsOnDate(
         string agentId, DateOnly date, IReadOnlyList<CoreToken> assigned, CoreWizardContext context)
     {
         foreach (var token in assigned)
