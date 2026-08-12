@@ -23,6 +23,18 @@ public sealed class TokenEvolutionLoop
     private const int SequentialParallelism = 1;
 
     private const string CrossoverStage = "crossover";
+
+    /// <summary>Origin label of a child cloned from one parent without crossover.</summary>
+    private const string CloneOriginLabel = "clone";
+
+    /// <summary>Origin label of a selected best that is no fresh child (elite, seed or injected).</summary>
+    private const string CarriedOriginLabel = "carried";
+
+    /// <summary>Joins the creation steps of one child into its origin chain, e.g. "crossover+mutation.swap".</summary>
+    private const string OriginChainSeparator = "+";
+
+    /// <summary>Label of the short-package count line the run emits for the returned best plan.</summary>
+    private const string FinalPlanLabel = "final";
     private const string SweepBeforePassesStage = "sweep1";
     private const string HandoverStage = "handover";
     private const string SurplusReturnStage = "surplusReturn";
@@ -105,6 +117,13 @@ public sealed class TokenEvolutionLoop
     /// The sink fires on a successful fill, never on a consultation, so a silent run proves the rung
     /// changed nothing. Null keeps the reporting out of the run.
     /// </param>
+    /// <param name="packageDiagnostics">
+    /// Optional sink for <see cref="ShortPackageTrace"/> (SPEC.md decision 13, seed-splintering
+    /// diagnosis): when set, every step that produces a plan is compared with its input and each
+    /// short package it creates ("+") or dissolves ("-") is reported with the step, the initial
+    /// population and each generation's selected best are reported with their short-package count
+    /// and the operator chain that produced the selected plan. Null keeps everything out of the run.
+    /// </param>
     public CoreScenario Run(
         CoreWizardContext context,
         TokenEvolutionConfig config,
@@ -112,7 +131,8 @@ public sealed class TokenEvolutionLoop
         CancellationToken cancellationToken = default,
         Action<string>? trace = null,
         Action<string>? blockDiagnostics = null,
-        Action<string>? repairEscalations = null)
+        Action<string>? repairEscalations = null,
+        Action<string>? packageDiagnostics = null)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         trace?.Invoke($"Run: enter (population={config.PopulationSize}, maxGen={config.MaxGenerations}, agents={context.Agents.Count}, shifts={context.Shifts.Count}, lockedWorks={context.LockedWorks.Count})");
@@ -130,6 +150,19 @@ public sealed class TokenEvolutionLoop
             for (var index = 0; index < population.Count; index++)
             {
                 OverlongBlockTrace.Report(blockDiagnostics, $"init[{index}]", null, population[index], context);
+            }
+        }
+
+        // Provenance of freshly built children by scenario id, so the selected-best line can name
+        // the operator chain that produced the plan. Only carried when the sink is active.
+        var provenance = packageDiagnostics is null
+            ? null
+            : new Dictionary<string, string>(StringComparer.Ordinal);
+        if (packageDiagnostics is not null)
+        {
+            for (var index = 0; index < population.Count; index++)
+            {
+                ShortPackageTrace.ReportCount(packageDiagnostics, $"init[{index}]", population[index], context);
             }
         }
 
@@ -185,10 +218,17 @@ public sealed class TokenEvolutionLoop
                 var child = crossed
                     ? _crossover.Apply(new TokenOperatorContext(p1, p2, context, rng))
                     : CloneScenario(p1);
+                var origin = crossed ? CrossoverStage : CloneOriginLabel;
                 if (crossed && blockDiagnostics is not null)
                 {
                     OverlongBlockTrace.Report(
                         blockDiagnostics, $"gen{generation}.{CrossoverStage}", p1, p2, child, context);
+                }
+
+                if (crossed && packageDiagnostics is not null)
+                {
+                    ShortPackageTrace.Report(
+                        packageDiagnostics, $"gen{generation}.{CrossoverStage}", p1, p2, child, context);
                 }
 
                 if (rng.NextDouble() < config.MutationRate)
@@ -197,7 +237,14 @@ public sealed class TokenEvolutionLoop
                     var (mutated, operatorName) =
                         ApplyWeightedMutation(child, context, rng, config, repairEscalationSink);
                     child = mutated;
+                    origin = origin + OriginChainSeparator + operatorName;
                     ReportOverlong(blockDiagnostics, generation, operatorName, parent, child, context);
+                    ReportShortPackages(packageDiagnostics, generation, operatorName, parent, child, context);
+                }
+
+                if (provenance is not null)
+                {
+                    provenance[child.Id] = origin;
                 }
 
                 children.Add(child);
@@ -208,6 +255,12 @@ public sealed class TokenEvolutionLoop
 
             population = next;
             var currentBest = SelectBest(population, evaluator);
+            if (packageDiagnostics is not null)
+            {
+                var selectedOrigin = provenance!.GetValueOrDefault(currentBest.Id, CarriedOriginLabel);
+                ShortPackageTrace.ReportCount(
+                    packageDiagnostics, $"gen{generation}.selected origin={selectedOrigin}", currentBest, context);
+            }
 
             var sweepStart = sw.ElapsedMilliseconds;
             var preSweep = currentBest;
@@ -215,22 +268,27 @@ public sealed class TokenEvolutionLoop
             currentBest = RunCoverageSweep(
                 currentBest, context, rng, evaluator, cancellationToken, trace, sweepBeforeEscalationSink);
             ReportOverlong(blockDiagnostics, generation, SweepBeforePassesStage, beforePass, currentBest, context);
+            ReportShortPackages(packageDiagnostics, generation, SweepBeforePassesStage, beforePass, currentBest, context);
 
             beforePass = currentBest;
             currentBest = RunTopDownHandover(currentBest, context, evaluator, handoverSeen, trace);
             ReportOverlong(blockDiagnostics, generation, HandoverStage, beforePass, currentBest, context);
+            ReportShortPackages(packageDiagnostics, generation, HandoverStage, beforePass, currentBest, context);
 
             beforePass = currentBest;
             currentBest = RunSurplusHoursReturn(currentBest, context, evaluator, surplusReturnSeen, trace);
             ReportOverlong(blockDiagnostics, generation, SurplusReturnStage, beforePass, currentBest, context);
+            ReportShortPackages(packageDiagnostics, generation, SurplusReturnStage, beforePass, currentBest, context);
 
             beforePass = currentBest;
             currentBest = RunShiftKindBalance(currentBest, context, evaluator, balanceSeen, trace);
             ReportOverlong(blockDiagnostics, generation, KindBalanceStage, beforePass, currentBest, context);
+            ReportShortPackages(packageDiagnostics, generation, KindBalanceStage, beforePass, currentBest, context);
 
             beforePass = currentBest;
             currentBest = RunObjectContinuityBalance(currentBest, context, evaluator, orderBalanceSeen, trace);
             ReportOverlong(blockDiagnostics, generation, OrderBalanceStage, beforePass, currentBest, context);
+            ReportShortPackages(packageDiagnostics, generation, OrderBalanceStage, beforePass, currentBest, context);
 
             // The handover and balance passes reshape blocks, which can open a legal fill for a slot
             // the first sweep had to skip — one more sweep catches it in the same generation.
@@ -238,6 +296,7 @@ public sealed class TokenEvolutionLoop
             currentBest = RunCoverageSweep(
                 currentBest, context, rng, evaluator, cancellationToken, trace, sweepAfterEscalationSink);
             ReportOverlong(blockDiagnostics, generation, SweepAfterPassesStage, beforePass, currentBest, context);
+            ReportShortPackages(packageDiagnostics, generation, SweepAfterPassesStage, beforePass, currentBest, context);
             if (!ReferenceEquals(currentBest, preSweep))
             {
                 EliteInjector.ReplaceWorst(population, currentBest, evaluator);
@@ -278,6 +337,7 @@ public sealed class TokenEvolutionLoop
         }
 
         trace?.Invoke($"Run: total {sw.ElapsedMilliseconds}ms");
+        ShortPackageTrace.ReportCount(packageDiagnostics, FinalPlanLabel, best, context);
         return best;
     }
 
@@ -360,6 +420,22 @@ public sealed class TokenEvolutionLoop
         }
 
         OverlongBlockTrace.Report(sink, $"gen{generation}.{pass}", before, after, context);
+    }
+
+    private static void ReportShortPackages(
+        Action<string>? sink,
+        int generation,
+        string pass,
+        CoreScenario before,
+        CoreScenario after,
+        CoreWizardContext context)
+    {
+        if (sink is null)
+        {
+            return;
+        }
+
+        ShortPackageTrace.Report(sink, $"gen{generation}.{pass}", before, after, context);
     }
 
     private static CoreScenario TournamentSelect(

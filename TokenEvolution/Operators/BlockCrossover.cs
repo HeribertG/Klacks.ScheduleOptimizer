@@ -7,12 +7,19 @@ using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 
 /// <summary>
-/// C1: 1-point block crossover. Takes the first k blocks (ordered by AgentId, FirstDate) from parent A
-/// and appends the blocks from parent B that do not collide on the same (agent, date, shift) triple,
-/// fill an already-taken (date, shift) slot, or trigger a Stage-0 or <see cref="SlotConstraintFilter"/>
-/// hard-constraint veto when added. Stage 0 alone only knows the MaxConsecutiveDays hard cap, so an
-/// appended block could grow a work block past the MaxWorkDays block length and below the MinRestDays
-/// free block that seeding, repair and reassign already enforce through the filter.
+/// C1: 1-point block crossover over CALENDAR packages. Takes the first k packages (ordered by
+/// AgentId, FirstDate) from parent A and appends the packages from parent B that do not collide on
+/// the same (agent, date, shift) triple, fill an already-taken (date, shift) slot, or trigger a
+/// Stage-0 or <see cref="SlotConstraintFilter"/> hard-constraint veto when added.
+/// <para>
+/// The exchange unit is a maximal run of consecutive worked calendar dates of one agent — NOT the
+/// genome BlockId, which the split/merge mutations fragment far below the calendar packages. The
+/// short-package attribution of SPEC.md decision 13 measured the BlockId-based exchange as the
+/// dominant splinter source of the whole evolution (+449 to +7741 net short packages per run):
+/// transferring a genome fragment whose calendar neighbours collide away leaves one-day and two-day
+/// rests in the child. A calendar package transfers whole or not at all, so an omission leaves a
+/// coverage HOLE for the package-aware sweep to refill instead of a splinter.
+/// </para>
 /// Locked tokens appear exactly once regardless of source.
 /// </summary>
 /// <param name="stage0">Hard-constraint checker used to filter parent-B blocks that would
@@ -43,12 +50,7 @@ public sealed class BlockCrossover : ITokenOperator
             agentsById[agent.Id] = agent;
         }
 
-        var blocksA = parentA.Tokens
-            .GroupBy(t => t.BlockId)
-            .Select(g => new { Id = g.Key, Tokens = g.ToList(), AgentId = g.First().AgentId, FirstDate = g.Min(t => t.Date) })
-            .OrderBy(b => b.AgentId, StringComparer.Ordinal)
-            .ThenBy(b => b.FirstDate)
-            .ToList();
+        var blocksA = CalendarPackages(parentA.Tokens);
 
         if (blocksA.Count == 0)
         {
@@ -70,10 +72,7 @@ public sealed class BlockCrossover : ITokenOperator
             }
         }
 
-        var parentBBlocks = parentB.Tokens
-            .GroupBy(t => t.BlockId)
-            .Select(g => new { Id = g.Key, Tokens = g.ToList() })
-            .ToList();
+        var parentBBlocks = CalendarPackages(parentB.Tokens);
 
         foreach (var block in parentBBlocks)
         {
@@ -151,6 +150,53 @@ public sealed class BlockCrossover : ITokenOperator
 
         return false;
     }
+
+    /// <summary>
+    /// The exchange units: maximal runs of consecutive worked calendar dates per agent, ordered by
+    /// AgentId and first date. Several shifts on one day (split duty) belong to the same run; the
+    /// genome BlockIds of the tokens are carried along untouched.
+    /// </summary>
+    /// <param name="tokens">Tokens of one parent plan</param>
+    private static List<CalendarPackage> CalendarPackages(IReadOnlyList<CoreToken> tokens)
+    {
+        var packages = new List<CalendarPackage>();
+        foreach (var perAgent in tokens
+                     .GroupBy(t => t.AgentId, StringComparer.Ordinal)
+                     .OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            List<CoreToken>? run = null;
+            DateOnly runStart = default;
+            DateOnly previous = default;
+
+            foreach (var token in perAgent.OrderBy(t => t.Date).ThenBy(t => t.StartAt))
+            {
+                if (run is not null && token.Date.DayNumber - previous.DayNumber <= 1)
+                {
+                    run.Add(token);
+                    previous = token.Date;
+                    continue;
+                }
+
+                if (run is not null)
+                {
+                    packages.Add(new CalendarPackage(perAgent.Key, runStart, run));
+                }
+
+                run = [token];
+                runStart = token.Date;
+                previous = token.Date;
+            }
+
+            if (run is not null)
+            {
+                packages.Add(new CalendarPackage(perAgent.Key, runStart, run));
+            }
+        }
+
+        return packages;
+    }
+
+    private sealed record CalendarPackage(string AgentId, DateOnly FirstDate, List<CoreToken> Tokens);
 
     private static Dictionary<(DateOnly, Guid), int> BuildSlotCapacity(CoreWizardContext context)
     {
