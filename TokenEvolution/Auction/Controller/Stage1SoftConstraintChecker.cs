@@ -98,6 +98,13 @@ public sealed class Stage1SoftConstraintChecker
         return null;
     }
 
+    /// <summary>
+    /// Calendar-day reading of the package rest, deliberately STRICTER than the hour reading of the
+    /// owner ruling 2026-08-12 (SPEC.md decision 12d, MinRestDays times 24 hours from shift end to
+    /// shift start, enforced by SlotConstraintFilter): the auction only seeds conservatively and can
+    /// never create a rest violation this way, it merely leaves some legal tight turnarounds to the
+    /// later operators. Aligning it to hours is an open follow-up of that ruling.
+    /// </summary>
     private static VetoVerdict? CheckMinRestDays(
         CoreAgent agent, DateOnly date, IReadOnlyList<CoreToken> assigned)
     {

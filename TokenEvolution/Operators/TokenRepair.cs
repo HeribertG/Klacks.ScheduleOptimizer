@@ -26,6 +26,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// never cost a fill that the strict rung already had, while the block-ideal-abiding candidate keeps
 /// precedence: the widest rung is consulted only where the slot would otherwise stay empty, which is
 /// the priority order of the specification (coverage first, the 5/2 package ideal far below it).
+/// Since the owner ruling of 2026-08-12 the ladder can no longer trade the package rest: MinRestDays
+/// (as hours) vetoes on every rung, so only the MaxWorkDays block ideal remains escalatable.
 /// </para>
 /// </summary>
 public sealed class TokenRepair : ITokenOperator
@@ -251,12 +253,13 @@ public sealed class TokenRepair : ITokenOperator
 
         // The escalation ladder. Every rung first offers the slot to the agents that can take it
         // directly and then to the one-move relocation, and the walk stops at the first rung with an
-        // answer. Rung 1 keeps every rule. Rung 2 lets the free block between two packages step aside:
-        // coverage outranks the rest days. Rung 3 additionally lets the MaxWorkDays block ideal step
-        // aside, which is what a slot needing the sixth consecutive day costs; it runs only where the
-        // slot would otherwise stay empty, so the block-ideal-abiding candidate always wins where one
-        // exists. No rung relaxes a hard rule - bans, rest hours, the consecutive-days cap and
-        // collisions gate the candidate on all three.
+        // answer. Rung 1 keeps every rule. Rung 2 is a historic no-op since the owner ruling of
+        // 2026-08-12: the rest between two packages (MinRestDays as hours) may no longer step aside
+        // for coverage. Rung 3 lets the MaxWorkDays block ideal step aside, which is what a slot
+        // needing the sixth consecutive day costs; it runs only where the slot would otherwise stay
+        // empty, so the block-ideal-abiding candidate always wins where one exists. No rung relaxes a
+        // hard rule - bans, rest hours and days, the consecutive-days cap and collisions gate the
+        // candidate on all three.
         List<CoreAgent> candidates = [];
         var reached = SlotRelaxation.None;
 

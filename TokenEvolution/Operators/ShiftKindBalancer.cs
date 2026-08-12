@@ -20,7 +20,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// A FULL swap — the two blocks cover exactly the same days — replaces a whole kind block by one of the
 /// same days and can therefore never leave a package holding two kinds. It keeps both historic
 /// acceptance paths: the lexicographic fitness improves strictly, or <see cref="ParetoFairnessGate"/>
-/// confirms that the fairness rises while no numbered rule from 1 to 8 moves the wrong way. A PARTIAL
+/// confirms that the fairness rises while the rules from 1 to 8 either hold or — within the gate's
+/// bounded trade allowance against the run's origin plan — are paid for by the fairness gain. A PARTIAL
 /// swap reaches inside a package and can break its kind constancy, which the gate's own rule-7 counter
 /// prices. It is accepted through the Pareto gate alone, and it additionally requires the two exchanged
 /// tokens of a day to carry the same hours, so no agent's daily or weekly hours move. The lexicographic
@@ -51,10 +52,11 @@ public sealed class ShiftKindBalancer
             return scenario;
         }
 
+        var origin = ParetoFairnessGate.SnapshotOf(scenario, context, evaluator);
         var current = scenario;
         for (var i = 0; i < MaxSwaps; i++)
         {
-            var swapped = FindImprovingSwap(current, context, evaluator);
+            var swapped = FindImprovingSwap(origin, current, context, evaluator);
             if (swapped is null)
             {
                 break;
@@ -67,7 +69,7 @@ public sealed class ShiftKindBalancer
     }
 
     private static CoreScenario? FindImprovingSwap(
-        CoreScenario scenario, CoreWizardContext context, TokenFitnessEvaluator evaluator)
+        ParetoGateSnapshot origin, CoreScenario scenario, CoreWizardContext context, TokenFitnessEvaluator evaluator)
     {
         var current = ParetoFairnessGate.SnapshotOf(scenario, context, evaluator);
         var currentKindFairness = current.ShiftKindFairness;
@@ -108,8 +110,8 @@ public sealed class ShiftKindBalancer
                         var proposed = ParetoFairnessGate.SnapshotOf(candidate, context, evaluator);
                         var accepted = overlap.CoversBothBlocks
                             ? evaluator.Compare(candidate, scenario) < 0
-                                || ParetoFairnessGate.Accepts(current, proposed)
-                            : ParetoFairnessGate.Accepts(current, proposed);
+                                || ParetoFairnessGate.Accepts(origin, current, proposed)
+                            : ParetoFairnessGate.Accepts(origin, current, proposed);
                         if (accepted)
                         {
                             return candidate;

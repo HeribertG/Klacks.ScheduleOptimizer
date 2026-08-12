@@ -18,12 +18,12 @@ public static class SlotConstraintFilter
     /// per-agent MinPauseHours (incl. cross-day overnight gaps), block-length and rest-day rules.
     /// The optional slot interval enables the MinPauseHours check; pass null for keyword-only seeds.
     /// <paramref name="relaxation"/> selects the rung of the coverage escalation:
-    /// <see cref="SlotRelaxation.RestDaysOnly"/> lets the MinRestDays rule step aside so a slot no
-    /// strictly valid agent can take may still be filled, and <see cref="SlotRelaxation.All"/> adds
-    /// the MaxWorkDays block ideal to that — the last resort of the escalation, because coverage is
-    /// the highest rule of the specification and the block ideal is not. No rung touches a hard rule:
-    /// the MaxConsecutiveDays cap, collisions, bans, keywords, breaks, hour caps, the minimum pause
-    /// and the restricted windows veto on every rung.
+    /// <see cref="SlotRelaxation.All"/> lets the MaxWorkDays block ideal step aside — the last resort
+    /// of the escalation, because coverage is the highest rule of the specification and the block
+    /// ideal is not. No rung touches a hard rule: the MaxConsecutiveDays cap, collisions, bans,
+    /// keywords, breaks, hour caps, the minimum pause, the restricted windows AND the package rest
+    /// (MinRestDays as hours, owner ruling 2026-08-12) veto on every rung —
+    /// <see cref="SlotRelaxation.RestDaysOnly"/> is a historic no-op rung since that ruling.
     /// </summary>
     public static bool IsValidAssignment(
         CoreAgent agent,
@@ -89,7 +89,7 @@ public static class SlotConstraintFilter
             return false;
         }
 
-        if (relaxation == SlotRelaxation.None && ViolatesMinRestDays(agent, date, alreadyAssigned, context))
+        if (ViolatesMinRestDays(agent, date, alreadyAssigned, context, slotStartUtc, slotEndUtc))
         {
             return false;
         }
@@ -334,27 +334,55 @@ public static class SlotConstraintFilter
         return false;
     }
 
+    /// <summary>Owner ruling 2026-08-12: one configured rest day between packages equals 24 hours.</summary>
+    private const int HoursPerRestDay = 24;
+
+    /// <summary>
+    /// Rest between two packages, measured in HOURS: the configured MinRestDays times 24, from the end
+    /// of the last shift of one package to the start of the first shift of the next (owner ruling
+    /// 2026-08-12, SPEC.md decision 12d — "2 days, computed as hours, so 48h", not two calendar days).
+    /// A day adjacent to an occupied day extends that package and is exempt, exactly as before. When
+    /// the caller supplies no slot times the old calendar-day arithmetic remains as the fallback.
+    /// Since the same ruling the check holds on EVERY escalation rung — the repair ladder may no
+    /// longer trade package rest for coverage.
+    /// </summary>
     private static bool ViolatesMinRestDays(
         CoreAgent agent,
         DateOnly date,
         IReadOnlyList<CoreToken> assigned,
-        CoreWizardContext context)
+        CoreWizardContext context,
+        DateTime? slotStart,
+        DateTime? slotEnd)
     {
         if (agent.MinRestDays <= 0)
         {
             return false;
         }
 
-        var hasPrev = HasAssignmentOnDate(agent.Id, date.AddDays(-1), assigned, context);
-        var hasNext = HasAssignmentOnDate(agent.Id, date.AddDays(+1), assigned, context);
+        // Package membership follows the day a shift STARTS on, exactly as the package builders read
+        // it. The overlap reading of HasAssignmentOnDate would let the morning end of a midnight
+        // crosser mark the next day as occupied, and a slot one day later would then pass as a
+        // package extension although it opens a NEW package after far too little rest.
+        var hasPrev = StartsOnDate(agent.Id, date.AddDays(-1), assigned, context);
+        var hasNext = StartsOnDate(agent.Id, date.AddDays(+1), assigned, context);
+        var requiredRestHours = agent.MinRestDays * (double)HoursPerRestDay;
 
         if (!hasPrev)
         {
             var lastBefore = FindNearestOccupiedDate(agent.Id, date, assigned, context, step: -1);
             if (lastBefore.HasValue)
             {
-                var gap = (date.DayNumber - lastBefore.Value.DayNumber) - 1;
-                if (gap < agent.MinRestDays)
+                var latestEnd = slotStart.HasValue
+                    ? LatestEndOnDate(agent.Id, lastBefore.Value, assigned, context)
+                    : null;
+                if (latestEnd.HasValue)
+                {
+                    if ((slotStart!.Value - latestEnd.Value).TotalHours < requiredRestHours)
+                    {
+                        return true;
+                    }
+                }
+                else if ((date.DayNumber - lastBefore.Value.DayNumber) - 1 < agent.MinRestDays)
                 {
                     return true;
                 }
@@ -366,8 +394,17 @@ public static class SlotConstraintFilter
             var firstAfter = FindNearestOccupiedDate(agent.Id, date, assigned, context, step: +1);
             if (firstAfter.HasValue)
             {
-                var gap = (firstAfter.Value.DayNumber - date.DayNumber) - 1;
-                if (gap < agent.MinRestDays)
+                var earliestStart = slotEnd.HasValue
+                    ? EarliestStartOnDate(agent.Id, firstAfter.Value, assigned, context)
+                    : null;
+                if (earliestStart.HasValue)
+                {
+                    if ((earliestStart.Value - slotEnd!.Value).TotalHours < requiredRestHours)
+                    {
+                        return true;
+                    }
+                }
+                else if ((firstAfter.Value.DayNumber - date.DayNumber) - 1 < agent.MinRestDays)
                 {
                     return true;
                 }
@@ -375,6 +412,123 @@ public static class SlotConstraintFilter
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// True when a shift of the agent STARTS on the day — the package reading of occupancy, blind to
+    /// the morning end of a midnight crosser on purpose.
+    /// </summary>
+    private static bool StartsOnDate(
+        string agentId, DateOnly date, IReadOnlyList<CoreToken> assigned, CoreWizardContext context)
+    {
+        foreach (var token in assigned)
+        {
+            if (token.AgentId == agentId && token.Date == date)
+            {
+                return true;
+            }
+        }
+
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            if (locked.AgentId == agentId && locked.Date == date)
+            {
+                return true;
+            }
+        }
+
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            if (blocker.AgentId == agentId && blocker.Date == date)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Latest shift end on one occupied day, read from the same sources as
+    /// <see cref="FindNearestOccupiedDate"/>; an entry counts for the day it starts on and — for a
+    /// midnight crosser — also for the day it ends on.
+    /// </summary>
+    private static DateTime? LatestEndOnDate(
+        string agentId, DateOnly day, IReadOnlyList<CoreToken> assigned, CoreWizardContext context)
+    {
+        DateTime? latest = null;
+
+        void Consider(string entryAgentId, DateOnly startDay, DateTime startAt, DateTime endAt)
+        {
+            if (entryAgentId != agentId)
+            {
+                return;
+            }
+
+            if ((startDay == day || DateOnly.FromDateTime(endAt) == day)
+                && (!latest.HasValue || endAt > latest.Value))
+            {
+                latest = endAt;
+            }
+        }
+
+        foreach (var token in assigned)
+        {
+            Consider(token.AgentId, token.Date, token.StartAt, token.EndAt);
+        }
+
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            Consider(locked.AgentId, locked.Date, locked.StartAt, locked.EndAt);
+        }
+
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            Consider(blocker.AgentId, blocker.Date, blocker.StartAt, blocker.EndAt);
+        }
+
+        return latest;
+    }
+
+    /// <summary>
+    /// Earliest shift start on one occupied day, from the same sources as
+    /// <see cref="LatestEndOnDate"/> and with the same midnight-crosser day matching.
+    /// </summary>
+    private static DateTime? EarliestStartOnDate(
+        string agentId, DateOnly day, IReadOnlyList<CoreToken> assigned, CoreWizardContext context)
+    {
+        DateTime? earliest = null;
+
+        void Consider(string entryAgentId, DateOnly startDay, DateTime startAt, DateTime endAt)
+        {
+            if (entryAgentId != agentId)
+            {
+                return;
+            }
+
+            if ((startDay == day || DateOnly.FromDateTime(endAt) == day)
+                && (!earliest.HasValue || startAt < earliest.Value))
+            {
+                earliest = startAt;
+            }
+        }
+
+        foreach (var token in assigned)
+        {
+            Consider(token.AgentId, token.Date, token.StartAt, token.EndAt);
+        }
+
+        foreach (var locked in context.BoundaryLockedWorks)
+        {
+            Consider(locked.AgentId, locked.Date, locked.StartAt, locked.EndAt);
+        }
+
+        foreach (var blocker in context.BoundaryExistingWorkBlockers)
+        {
+            Consider(blocker.AgentId, blocker.Date, blocker.StartAt, blocker.EndAt);
+        }
+
+        return earliest;
     }
 
     private static DateOnly? FindNearestOccupiedDate(

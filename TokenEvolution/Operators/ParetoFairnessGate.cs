@@ -13,10 +13,20 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// intra-day gap, and the Stage-4 cosmetics. A swap that raises the fairness and pays for it only with
 /// one of those helpers is therefore rejected today although the priority order permits it.
 /// <para>
-/// This gate accepts exactly that case: the fairness must rise strictly and no rule between 1 and 8 may
-/// move the wrong way. Everything the priority order places below rule 9 is free to fluctuate. The
-/// comparison always runs against the CURRENT intermediate plan, so over a chain of swaps every
-/// protected component is monotonically non-decreasing.
+/// This gate accepts that case unconditionally: the fairness must rise strictly and no rule between 1
+/// and 8 may move the wrong way. Everything the priority order places below rule 9 is free to
+/// fluctuate. The comparison always runs against the CURRENT intermediate plan, so over a chain of
+/// swaps every protected component is monotonically non-decreasing on this path.
+/// </para>
+/// <para>
+/// Owner ruling 2026-08-12 (SPEC.md decision 12c, "fairness is fuzzy, not sharp"): fairness may
+/// additionally buy a SMALL, bounded regression of the soft rules 7 and 8. The trade path opens only
+/// once the fairness gain against the plan the balancer STARTED from reaches
+/// <see cref="MinFairnessGainForTrade"/>; it may then spend at most <see cref="FairnessTradeRate"/>
+/// times that gain as block-order loss and at most <see cref="MaxMixedPackagesTradeIncrease"/> extra
+/// mixed package, both measured cumulatively against that origin snapshot, so a chain of swaps can
+/// never drift further than the single-swap allowance. The hard rules — legality, hour coverage, the
+/// blacklist share and the overlong count of rule 6 — are never tradable.
 /// </para>
 /// <para>
 /// Rule 6 has no fitness representation, so the overlong-package count enters the snapshot explicitly
@@ -28,6 +38,21 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// </summary>
 public static class ParetoFairnessGate
 {
+    /// <summary>
+    /// Smallest cumulative fairness gain (origin to candidate, on the [0..1] stddev-based fairness
+    /// scale) that opens the rule-7/8 trade path; below it the gate stays strictly Pareto.
+    /// </summary>
+    public const double MinFairnessGainForTrade = 0.01;
+
+    /// <summary>
+    /// Fraction of the cumulative fairness gain that may be spent as block-order loss (both terms
+    /// live on a [0..1] scale). Below 1 the trade always favours the higher-ranked rules 7/8.
+    /// </summary>
+    public const double FairnessTradeRate = 0.5;
+
+    /// <summary>Most extra mixed packages one balancer run may accumulate through trades.</summary>
+    public const int MaxMixedPackagesTradeIncrease = 1;
+
     /// <summary>
     /// Reads the numbered-rule components of one plan. Runs the full evaluation, so the plan carries
     /// its stage fitness afterwards and can be handed to <c>TokenFitnessEvaluator.Compare</c>.
@@ -54,18 +79,54 @@ public static class ParetoFairnessGate
 
     /// <summary>
     /// True when the candidate raises the shift-kind fairness without moving any numbered rule from 1
-    /// to 8 the wrong way.
+    /// to 8 the wrong way. Kept as the strict single-step form for callers without an origin plan;
+    /// equivalent to the three-snapshot overload with the current plan as its own origin.
     /// </summary>
     /// <param name="current">Snapshot of the plan the swap starts from</param>
     /// <param name="candidate">Snapshot of the plan the swap would produce</param>
     public static bool Accepts(ParetoGateSnapshot current, ParetoGateSnapshot candidate)
-        => candidate.ShiftKindFairness > current.ShiftKindFairness
+        => Accepts(current, current, candidate);
+
+    /// <summary>
+    /// True when the candidate raises the shift-kind fairness strictly over the current plan and either
+    /// no rule between 1 and 8 moves the wrong way, or the cumulative fairness gain over the origin
+    /// plan is large enough to buy the candidate's cumulative rule-7/8 regression within the trade
+    /// bounds. Hard components always compare against the CURRENT plan and stay monotonic; the two
+    /// tradable ones compare against the ORIGIN plan so the allowance cannot compound over a chain.
+    /// </summary>
+    /// <param name="origin">Snapshot of the plan the balancer run started from; owns the trade budget</param>
+    /// <param name="current">Snapshot of the plan the swap starts from</param>
+    /// <param name="candidate">Snapshot of the plan the swap would produce</param>
+    public static bool Accepts(
+        ParetoGateSnapshot origin, ParetoGateSnapshot current, ParetoGateSnapshot candidate)
+    {
+        var hardRulesHold = candidate.ShiftKindFairness > current.ShiftKindFairness
             && candidate.Legality <= current.Legality
             && candidate.Stage0 <= current.Stage0
             && candidate.Stage1 >= current.Stage1
             && candidate.Stage2 >= current.Stage2
-            && candidate.BlockOrder >= current.BlockOrder
             && candidate.Blacklist >= current.Blacklist
-            && candidate.OverlongPackages <= current.OverlongPackages
-            && candidate.MixedPackages <= current.MixedPackages;
+            && candidate.OverlongPackages <= current.OverlongPackages;
+        if (!hardRulesHold)
+        {
+            return false;
+        }
+
+        if (candidate.BlockOrder >= current.BlockOrder && candidate.MixedPackages <= current.MixedPackages)
+        {
+            return true;
+        }
+
+        var cumulativeFairnessGain = candidate.ShiftKindFairness - origin.ShiftKindFairness;
+        if (cumulativeFairnessGain < MinFairnessGainForTrade)
+        {
+            return false;
+        }
+
+        var cumulativeBlockOrderLoss = origin.BlockOrder - candidate.BlockOrder;
+        var cumulativeMixedIncrease = candidate.MixedPackages - origin.MixedPackages;
+
+        return cumulativeBlockOrderLoss <= FairnessTradeRate * cumulativeFairnessGain
+            && cumulativeMixedIncrease <= MaxMixedPackagesTradeIncrease;
+    }
 }
