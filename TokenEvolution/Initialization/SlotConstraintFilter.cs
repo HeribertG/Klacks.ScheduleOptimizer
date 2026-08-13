@@ -585,39 +585,6 @@ public static class SlotConstraintFilter
     private static bool CrossesMidnight(CoreToken token) =>
         token.EndAt.Date > token.StartAt.Date;
 
-    private static DateOnly? FindNearestAssignedDate(
-        string agentId,
-        DateOnly anchor,
-        IReadOnlyList<CoreToken> assigned,
-        int step)
-    {
-        DateOnly? best = null;
-        foreach (var token in assigned)
-        {
-            if (token.AgentId != agentId)
-            {
-                continue;
-            }
-
-            if (step < 0 && token.Date < anchor)
-            {
-                if (!best.HasValue || token.Date > best.Value)
-                {
-                    best = token.Date;
-                }
-            }
-            else if (step > 0 && token.Date > anchor)
-            {
-                if (!best.HasValue || token.Date < best.Value)
-                {
-                    best = token.Date;
-                }
-            }
-        }
-
-        return best;
-    }
-
     private static int CountConsecutive(
         string agentId,
         DateOnly anchor,

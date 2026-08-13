@@ -103,7 +103,11 @@ public sealed class Stage1SoftConstraintChecker
     /// owner ruling 2026-08-12 (SPEC.md decision 12d, MinRestDays times 24 hours from shift end to
     /// shift start, enforced by SlotConstraintFilter): the auction only seeds conservatively and can
     /// never create a rest violation this way, it merely leaves some legal tight turnarounds to the
-    /// later operators. Aligning it to hours is an open follow-up of that ruling.
+    /// later operators. Aligning it to hours was tried and MEASURED on 2026-08-13: the extra tight
+    /// turnarounds in the seeds splintered the final plans (scenario 1 short-package share 0.42 to
+    /// 0.51, kind spread 6 to 9, top-rank hours minus 24; scenario 2 forward rotation 0.35 to 0.28,
+    /// ideal share 0.19 to 0.06). The calendar-day reading is therefore a deliberate protective
+    /// layer for the package structure, not an open follow-up.
     /// </summary>
     private static VetoVerdict? CheckMinRestDays(
         CoreAgent agent, DateOnly date, IReadOnlyList<CoreToken> assigned)
@@ -197,34 +201,6 @@ public sealed class Stage1SoftConstraintChecker
             }
         }
         return false;
-    }
-
-    private static DateOnly? FindNearestAssignedDate(
-        string agentId, DateOnly anchor, IReadOnlyList<CoreToken> assigned, int step)
-    {
-        DateOnly? best = null;
-        foreach (var t in assigned)
-        {
-            if (t.AgentId != agentId)
-            {
-                continue;
-            }
-            if (step < 0 && t.Date < anchor)
-            {
-                if (!best.HasValue || t.Date > best.Value)
-                {
-                    best = t.Date;
-                }
-            }
-            else if (step > 0 && t.Date > anchor)
-            {
-                if (!best.HasValue || t.Date < best.Value)
-                {
-                    best = t.Date;
-                }
-            }
-        }
-        return best;
     }
 
     private static DateOnly? FindNearestOccupiedDate(
