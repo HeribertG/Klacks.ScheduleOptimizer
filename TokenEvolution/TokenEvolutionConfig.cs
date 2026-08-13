@@ -70,6 +70,9 @@ public sealed record TokenEvolutionConfig
     /// <summary>Stage-3 weight for holding the carried-in packages that are still open at the period start. Ignored, weight included, when the context has no open package.</summary>
     public double FitnessStage3CarryIn { get; init; } = 0.2;
 
+    /// <summary>Stage-3 weight for package compactness (rule 6): the share of calendar packages longer than the short-package bound. Guards the compact auction seeds against splintering by swap and crossover offspring.</summary>
+    public double FitnessStage3PackageLength { get; init; } = 0.4;
+
     /// <summary>Optional soft wall-clock budget. When exceeded the loop stops at the next generation boundary and returns the best solution found so far. Null = no time limit.</summary>
     public TimeSpan? MaxRuntime { get; init; }
 }

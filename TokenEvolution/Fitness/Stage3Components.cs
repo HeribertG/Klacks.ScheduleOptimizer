@@ -10,8 +10,13 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 /// <param name="Blacklist">Fraction of tokens NOT on a blacklisted shift preference</param>
 /// <param name="Location">Location continuity across consecutive tokens</param>
 /// <param name="MaxGap">Adherence to the optimal intra-day gap between tokens</param>
+/// <param name="PackageCompactness">
+/// Share of calendar packages longer than the short-package bound (rule 6). Defaults to the
+/// neutral 1 so construction sites predating the term keep compiling and scoring as before.
+/// </param>
 public sealed record Stage3Components(
     double BlockOrder,
     double Blacklist,
     double Location,
-    double MaxGap);
+    double MaxGap,
+    double PackageCompactness = 1);

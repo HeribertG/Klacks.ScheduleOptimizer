@@ -4,6 +4,7 @@ using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
 using Klacks.ScheduleOptimizer.TokenEvolution;
+using Klacks.ScheduleOptimizer.TokenEvolution.Diagnostics;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
@@ -48,6 +49,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// <summary>Stage-3 weight for holding the carried-in packages that are still open at the period start.</summary>
     public double Stage3CarryInWeight { get; init; } = 0.2;
 
+    /// <summary>Stage-3 package-compactness weight (rule 6).</summary>
+    public double Stage3PackageLengthWeight { get; init; } = 0.4;
+
     public TokenFitnessEvaluator(
         TokenConstraintChecker constraintChecker,
         IReadOnlyDictionary<string, double> maxPossiblePerAgent,
@@ -77,6 +81,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Stage3LocationWeight = cfg.FitnessStage3Location,
             Stage3MaxGapWeight = cfg.FitnessStage3MaxGap,
             Stage3CarryInWeight = cfg.FitnessStage3CarryIn,
+            Stage3PackageLengthWeight = cfg.FitnessStage3PackageLength,
         };
     }
 
@@ -116,7 +121,8 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             BlockOrder: ComputeBlockOrderingScore(scenario, context),
             Blacklist: ComputeBlacklistScore(scenario, context),
             Location: ComputeLocationContinuityScore(scenario),
-            MaxGap: ComputeMaxOptimalGapScore(scenario, context));
+            MaxGap: ComputeMaxOptimalGapScore(scenario, context),
+            PackageCompactness: ComputePackageCompactnessScore(scenario, context));
 
         var stage4 = new Stage4Components(
             Fairness: ComputeFairnessScore(scenario, context),
@@ -336,6 +342,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var blacklist = ComputeBlacklistScore(scenario, context);
         var location = ComputeLocationContinuityScore(scenario);
         var gap = ComputeMaxOptimalGapScore(scenario, context);
+        var packageLength = ComputePackageCompactnessScore(scenario, context);
 
         // A context without an open carry-in package drops the term AND its weight, so the stage-3
         // value of such a run is bit-identical to the value before the term existed.
@@ -344,7 +351,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var carryIn = carryInWeight > 0 ? ComputeCarryInContinuityScore(scenario, anchor, packages) : 0;
 
         var totalWeight = Stage3BlockOrderWeight + Stage3BlacklistWeight + Stage3LocationWeight
-            + Stage3MaxGapWeight + carryInWeight;
+            + Stage3MaxGapWeight + Stage3PackageLengthWeight + carryInWeight;
         if (totalWeight <= 0)
         {
             return 0;
@@ -354,7 +361,22 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 + blacklist * Stage3BlacklistWeight
                 + location * Stage3LocationWeight
                 + gap * Stage3MaxGapWeight
+                + packageLength * Stage3PackageLengthWeight
                 + (carryIn * carryInWeight)) / totalWeight;
+    }
+
+    /// <summary>
+    /// Rule 6 (package integrity): share of calendar packages longer than the short-package bound,
+    /// boundary works included so a continued carry-in run is not misread as short. This is the
+    /// first stage that actually carries package length — ComputeBlockSymmetryScore groups by
+    /// genome BlockIds, which every producing site refreshes, so it measures nothing (same finding
+    /// as in ComputeBlockOrderingScore) and swap or crossover offspring could splinter the compact
+    /// auction seeds unpunished; measured in RESULTS-PAKETREPARATUR-P1P2-2026-08-12.
+    /// </summary>
+    private static double ComputePackageCompactnessScore(CoreScenario scenario, CoreWizardContext context)
+    {
+        var (shortCount, totalCount) = ShortPackageTrace.Counts(scenario, context);
+        return totalCount == 0 ? 1 : 1 - ((double)shortCount / totalCount);
     }
 
     /// <summary>

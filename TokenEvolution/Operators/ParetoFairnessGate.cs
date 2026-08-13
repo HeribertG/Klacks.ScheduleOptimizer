@@ -74,7 +74,8 @@ public static class ParetoFairnessGate
             Blacklist: detailed.Stage3Components.Blacklist,
             ShiftKindFairness: detailed.Stage4Components.ShiftKindFairness,
             OverlongPackages: OverlongBlockTrace.Overlong(plan, context).Count,
-            MixedPackages: MixedKindPackageTrace.Count(plan));
+            MixedPackages: MixedKindPackageTrace.Count(plan),
+            ShortPackages: ShortPackageTrace.Counts(plan, context).ShortCount);
     }
 
     /// <summary>
@@ -106,7 +107,8 @@ public static class ParetoFairnessGate
             && candidate.Stage1 >= current.Stage1
             && candidate.Stage2 >= current.Stage2
             && candidate.Blacklist >= current.Blacklist
-            && candidate.OverlongPackages <= current.OverlongPackages;
+            && candidate.OverlongPackages <= current.OverlongPackages
+            && candidate.ShortPackages <= current.ShortPackages;
         if (!hardRulesHold)
         {
             return false;

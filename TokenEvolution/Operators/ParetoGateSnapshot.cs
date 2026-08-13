@@ -18,6 +18,12 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// <paramref name="BlockOrder"/>, which averages rule 7 with the rotation of rule 8 and would let the
 /// lower-ranked rule pay for the higher one.
 /// </param>
+/// <param name="ShortPackages">
+/// Calendar packages of at most the short-package bound in days (rule 6); lower is better. Read as
+/// its own hard component so the balancer cannot splinter packages to buy fairness; the stage-3
+/// compactness term alone would let it pay with an average. Defaults to 0 so construction sites
+/// predating the component keep compiling.
+/// </param>
 public readonly record struct ParetoGateSnapshot(
     int Legality,
     int Stage0,
@@ -27,4 +33,5 @@ public readonly record struct ParetoGateSnapshot(
     double Blacklist,
     double ShiftKindFairness,
     int OverlongPackages,
-    int MixedPackages);
+    int MixedPackages,
+    int ShortPackages = 0);

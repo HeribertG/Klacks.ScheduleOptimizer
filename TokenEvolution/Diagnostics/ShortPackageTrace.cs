@@ -110,6 +110,52 @@ public static class ShortPackageTrace
     /// <param name="context">Wizard context supplying the works outside the genome</param>
     public static HashSet<string> Short(CoreScenario scenario, CoreWizardContext context)
     {
+        var datesByAgent = DatesByAgent(scenario, context);
+        var shortPackages = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (agentId, dates) in datesByAgent)
+        {
+            foreach (var run in Runs(dates))
+            {
+                var length = run.End.DayNumber - run.Start.DayNumber + 1;
+                if (length <= ShortPackageMaxDays)
+                {
+                    shortPackages.Add(Key(agentId, run.Start, run.End, length));
+                }
+            }
+        }
+
+        return shortPackages;
+    }
+
+    /// <summary>
+    /// Short and total calendar-package counts of one plan — the fitness reading of
+    /// <see cref="Short"/> with the same grouping and boundary handling, without building the
+    /// sortable keys. Meant for the hot evaluation path.
+    /// </summary>
+    /// <param name="scenario">Plan to measure</param>
+    /// <param name="context">Wizard context supplying the works outside the genome</param>
+    public static (int ShortCount, int TotalCount) Counts(CoreScenario scenario, CoreWizardContext context)
+    {
+        var shortCount = 0;
+        var totalCount = 0;
+        foreach (var (_, dates) in DatesByAgent(scenario, context))
+        {
+            foreach (var run in Runs(dates))
+            {
+                totalCount++;
+                if (run.End.DayNumber - run.Start.DayNumber + 1 <= ShortPackageMaxDays)
+                {
+                    shortCount++;
+                }
+            }
+        }
+
+        return (shortCount, totalCount);
+    }
+
+    private static Dictionary<string, SortedSet<DateOnly>> DatesByAgent(
+        CoreScenario scenario, CoreWizardContext context)
+    {
         var datesByAgent = new Dictionary<string, SortedSet<DateOnly>>(StringComparer.Ordinal);
         foreach (var token in scenario.Tokens)
         {
@@ -126,20 +172,7 @@ public static class ShortPackageTrace
             Remember(datesByAgent, blocker.AgentId, blocker.Date);
         }
 
-        var shortPackages = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (agentId, dates) in datesByAgent)
-        {
-            foreach (var run in Runs(dates))
-            {
-                var length = run.End.DayNumber - run.Start.DayNumber + 1;
-                if (length <= ShortPackageMaxDays)
-                {
-                    shortPackages.Add(Key(agentId, run.Start, run.End, length));
-                }
-            }
-        }
-
-        return shortPackages;
+        return datesByAgent;
     }
 
     private static void Remember(
