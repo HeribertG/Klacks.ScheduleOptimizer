@@ -36,6 +36,78 @@ public sealed class TokenRepair : ITokenOperator
 
     private const string RelocatedFill = "relocate";
 
+    private static readonly object CarryInLock = new();
+    private static CoreWizardContext? _carryInContext;
+    private static DateOnly _carryInAnchor;
+    private static IReadOnlyList<CarryInPackage>? _carryInPackages;
+
+    /// <summary>True when the slot is a continuation day of any open carried-in package.</summary>
+    internal static bool IsContinuationSlot(CoreWizardContext context, DateOnly date, Guid shiftRefId)
+        => ContinuationOwnerIdOf(context, date, shiftRefId) is not null;
+
+    /// <summary>
+    /// The valid candidate that OWNS the open carried-in package this slot continues, or null when
+    /// the slot is no continuation day. Detection is cached per context like in the fitness
+    /// evaluator — the carried-in packages read only fixed works and never change during a run;
+    /// a foreign context simply re-detects, so the static cache stays correct across runs.
+    /// </summary>
+    private static CoreAgent? ContinuationOwnerOf(
+        CoreWizardContext context, DateOnly date, Guid shiftRefId, IReadOnlyList<CoreAgent> candidates)
+    {
+        var ownerId = ContinuationOwnerIdOf(context, date, shiftRefId);
+        if (ownerId is null)
+        {
+            return null;
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (string.Equals(candidate.Id, ownerId, StringComparison.Ordinal))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Agent id owning the open carried-in package this slot continues, or null.</summary>
+    internal static string? ContinuationOwnerIdOf(CoreWizardContext context, DateOnly date, Guid shiftRefId)
+    {
+        DateOnly anchor;
+        IReadOnlyList<CarryInPackage> packages;
+        lock (CarryInLock)
+        {
+            if (!ReferenceEquals(_carryInContext, context))
+            {
+                _carryInAnchor = CarryInContinuation.FirstPlannableDay(context);
+                _carryInPackages = CarryInContinuation.Detect(context, _carryInAnchor);
+                _carryInContext = context;
+            }
+
+            anchor = _carryInAnchor;
+            packages = _carryInPackages!;
+        }
+
+        foreach (var package in packages)
+        {
+            if (package.ShiftRefId != shiftRefId)
+            {
+                continue;
+            }
+
+            var offset = date.DayNumber - anchor.DayNumber;
+            if (offset < 0 || offset >= package.RemainingDays)
+            {
+                continue;
+            }
+
+            return package.AgentId;
+        }
+
+        return null;
+    }
+
     private const string EscalationDateFormat = "yyyy-MM-dd";
 
     private static readonly SlotRelaxation[] CoverageLadder =
@@ -132,12 +204,16 @@ public sealed class TokenRepair : ITokenOperator
             // Date order is load-bearing for the package-aware fill (SPEC.md decision 13): every
             // filled day turns its neighbour slot into an extension case for the same agent, so a
             // stretch of open days grows back as one package instead of scattered single days.
+            // Inside one day the continuation slot of an open carried-in package goes FIRST (M11e):
+            // otherwise its owner may already be consumed by another slot of the same day and the
+            // deterministic continuation priority finds no valid candidate to protect.
             var pending = violations
                 .Where(v => v.Kind == ViolationKind.UnderSupply && v.ShiftRefId.HasValue && v.Date.HasValue)
                 .Select(v => (Key: (v.ShiftRefId!.Value, v.Date!.Value), Violation: v))
                 .GroupBy(x => x.Key)
                 .Select(g => g.First().Violation)
                 .OrderBy(v => v.Date!.Value)
+                .ThenBy(v => IsContinuationSlot(context, v.Date!.Value, v.ShiftRefId!.Value) ? 0 : 1)
                 .ThenBy(v => v.ShiftRefId!.Value)
                 .ToList();
 
@@ -297,9 +373,15 @@ public sealed class TokenRepair : ITokenOperator
             return false;
         }
 
-        var chosen = RosterPositionBias.PickAccuracyAware(
-            candidates, primary.Tokens, wizard.Agents, rng,
-            agent => ExtendsAPackage(agent, violation.Date.Value, primary.Tokens, wizard));
+        // A10/A11 as a deterministic fill priority (M11d, 2026-08-13): when the slot IS the next
+        // continuation day of an open carried-in package and its owner is a valid candidate, the
+        // owner takes it — before any roulette and before the night tie-break, which otherwise
+        // evicts the continuation owner among several extenders (the measured M11 conflict).
+        var chosen = ContinuationOwnerOf(wizard, violation.Date.Value, violation.ShiftRefId.Value, candidates)
+            ?? RosterPositionBias.PickAccuracyAware(
+                candidates, primary.Tokens, wizard.Agents, rng,
+                agent => ExtendsAPackage(agent, violation.Date.Value, primary.Tokens, wizard),
+                balanceNightShare: shiftTypeIndex == RosterPositionBias.NightShiftTypeIndex);
         if (reached == SlotRelaxation.All)
         {
             ReportEscalation(escalations, chosen.Id, violation.Date.Value, DirectFill);

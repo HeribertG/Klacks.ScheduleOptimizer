@@ -51,12 +51,22 @@ public static class RosterPositionBias
     /// <param name="roster">Authoritative ordered agent list; index 0 is top.</param>
     /// <param name="rng">RNG instance owned by the caller for reproducibility.</param>
     /// <param name="preferWhere">Optional tie-breaking preference applied inside the accuracy group.</param>
+    /// <param name="balanceNightShare">
+    /// M11 (rule 9, 2026-08-13): when the slot being given away is a NIGHT, narrow the pool to the
+    /// candidates currently holding the fewest nights — applied after the accuracy group (rule 5)
+    /// and after <paramref name="preferWhere"/> (rule 6), so the higher-ranked rules stay in
+    /// charge and fairness only breaks the remaining tie. Without this the ruin-recreate rebuild
+    /// handed the nights of a whole window to the same agents over and over (Sz3: one agent at 19
+    /// of 31 nights, cohort spread 0.45), and no later pass could dissolve the hoard because
+    /// single-day fairness swaps are edge-illegal on compact plans (rejection census 2026-08-13).
+    /// </param>
     public static CoreAgent PickAccuracyAware(
         IReadOnlyList<CoreAgent> candidates,
         IReadOnlyList<CoreToken> assignedTokens,
         IReadOnlyList<CoreAgent> roster,
         Random rng,
-        Func<CoreAgent, bool>? preferWhere = null)
+        Func<CoreAgent, bool>? preferWhere = null,
+        bool balanceNightShare = false)
     {
         var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var token in assignedTokens)
@@ -82,10 +92,34 @@ public static class RosterPositionBias
             }
         }
 
+        // The tie-break also runs inside the rule-6 preference group: restricting it to
+        // preference-free picks (tried as M11c on 2026-08-13) surrendered the whole night-fairness
+        // gain, because on compact plans nearly every fill has extenders. The one candidate the
+        // break must never evict — the owner of an open carried-in package — is protected UPSTREAM
+        // by the deterministic continuation priority of the repair fill (rules A10/A11), so the
+        // conflict measured as M11 cannot reoccur here.
+        if (balanceNightShare && pool.Count > 1)
+        {
+            var nightsByAgent = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var token in assignedTokens)
+            {
+                if (token.ShiftTypeIndex == NightShiftTypeIndex)
+                {
+                    nightsByAgent[token.AgentId] = nightsByAgent.GetValueOrDefault(token.AgentId) + 1;
+                }
+            }
+
+            var fewestNights = pool.Min(a => nightsByAgent.GetValueOrDefault(a.Id));
+            pool = pool.Where(a => nightsByAgent.GetValueOrDefault(a.Id) == fewestNights).ToList();
+        }
+
         return belowTarget.Count > 0
             ? PickWithTopBias(pool, a => a.Id, roster, rng)
             : PickWithBottomBias(pool, a => a.Id, roster, rng);
     }
+
+    /// <summary>Token shift-type index of a night shift, as the whole token engine reads it.</summary>
+    internal const int NightShiftTypeIndex = 2;
 
     private static T Pick<T>(
         IReadOnlyList<T> candidates,

@@ -44,6 +44,10 @@ public sealed class ReassignMutation : ITokenOperator
             return TokenSwapMutation.CloneScenario(context.Primary, tokens);
         }
 
+        // The M11 night tie-break stays OUT of the reassign on purpose (measured 2026-08-13):
+        // biasing the receiver of an EXISTING night steals carried-in continuation nights from
+        // their owner (Sz3 A11 broke) and destabilised the Sz1 ideal structure. The fairness
+        // belongs into the fills that CREATE nights (TokenRepair), not into re-owning them.
         var newAgent = RosterPositionBias.PickAccuracyAware(
             validAgents,
             tokensWithoutCurrent,

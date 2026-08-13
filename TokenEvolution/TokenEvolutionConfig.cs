@@ -35,6 +35,24 @@ public sealed record TokenEvolutionConfig
     /// <summary>Weight of the package-consolidation trade (rule 6): dissolves a short package through an equal-hours swap onto a date that extends another package of the same agent. Additive to the other five weights, so their mutual ratios stay untouched; 0 removes the operator and reproduces the pre-operator draw sequence.</summary>
     public double MutationWeightConsolidate { get; init; } = 0.15;
 
+    /// <summary>Weight of the ruin-and-recreate macro move: one contiguous RuinWindowMinDays..RuinWindowMaxDays calendar window loses every non-locked token and the package-aware coverage sweep rebuilds it; only the end state is compared. Additive; 0 removes the move and replays the prior draw sequence byte-identically.</summary>
+    public double MutationWeightRuinRecreate { get; init; } = 0.10;
+
+    /// <summary>Smallest ruined window in calendar days. Deliberately several days: destroying too little cannot escape a basin in tightly coupled rosters (Legrain, INRC-II).</summary>
+    public int RuinWindowMinDays { get; init; } = 5;
+
+    /// <summary>Largest ruined window in calendar days.</summary>
+    public int RuinWindowMaxDays { get; init; } = 10;
+
+    /// <summary>Weight of the play-sequence transaction: a child plays PlaySequenceMinSteps..PlaySequenceMaxSteps draws from the single-operator pool in a row and ONLY the end state enters the lexicographic comparison — the literature-standard transactional move (SSHH acceptance at sequence end, memetic child polishing) against single-move greedy attractors. Additive; 0 removes the transaction and replays the single-draw sequence byte-identically.</summary>
+    public double MutationWeightPlaySequence { get; init; } = 0.15;
+
+    /// <summary>Smallest number of single-operator draws inside one play-sequence transaction.</summary>
+    public int PlaySequenceMinSteps { get; init; } = 2;
+
+    /// <summary>Largest number of single-operator draws inside one play-sequence transaction.</summary>
+    public int PlaySequenceMaxSteps { get; init; } = 4;
+
     public int EarlyStopNoImprovementGenerations { get; init; } = 30;
 
     public int RandomSeed { get; init; } = 0;
@@ -73,7 +91,7 @@ public sealed record TokenEvolutionConfig
     /// <summary>Stage-3 weight for holding the carried-in packages that are still open at the period start. Ignored, weight included, when the context has no open package.</summary>
     public double FitnessStage3CarryIn { get; init; } = 0.2;
 
-    /// <summary>Stage-3 weight for package compactness (rule 6): the share of calendar packages longer than the short-package bound. Guards the compact auction seeds against splintering by swap and crossover offspring.</summary>
+    /// <summary>Stage-3 weight for package compactness (rule 6): the share of calendar packages longer than the short-package bound. Guards the compact auction seeds against splintering by swap and crossover offspring. Doubling to 0.8 was measured on 2026-08-13 and REJECTED: it bought only scenario-2 polish, erased the whole scenario-1b sequence win (0.14 back to 0.27) and pushed fairness/attribution edges out of the selection (Sz3 spread and A24 rips) — the stage-3 balance tips before the compactness defence pays.</summary>
     public double FitnessStage3PackageLength { get; init; } = 0.4;
 
     /// <summary>Optional soft wall-clock budget. When exceeded the loop stops at the next generation boundary and returns the best solution found so far. Null = no time limit.</summary>

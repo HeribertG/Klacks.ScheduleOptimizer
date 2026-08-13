@@ -23,10 +23,11 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// additionally buy a SMALL, bounded regression of the soft rules 7 and 8. The trade path opens only
 /// once the fairness gain against the plan the balancer STARTED from reaches
 /// <see cref="MinFairnessGainForTrade"/>; it may then spend at most <see cref="FairnessTradeRate"/>
-/// times that gain as block-order loss and at most <see cref="MaxMixedPackagesTradeIncrease"/> extra
-/// mixed package, both measured cumulatively against that origin snapshot, so a chain of swaps can
-/// never drift further than the single-swap allowance. The hard rules — legality, hour coverage, the
-/// blacklist share and the overlong count of rule 6 — are never tradable.
+/// times that gain as block-order loss, at most <see cref="MaxMixedPackagesTradeIncrease"/> extra
+/// mixed package and at most <see cref="MaxShortPackagesTradeIncrease"/> extra short package, all
+/// measured cumulatively against that origin snapshot, so a chain of swaps can never drift further
+/// than the single-swap allowance. The hard rules — legality, hour coverage, the blacklist share
+/// and the overlong count of rule 6 — are never tradable.
 /// </para>
 /// <para>
 /// Rule 6 has no fitness representation, so the overlong-package count enters the snapshot explicitly
@@ -52,6 +53,15 @@ public static class ParetoFairnessGate
 
     /// <summary>Most extra mixed packages one balancer run may accumulate through trades.</summary>
     public const int MaxMixedPackagesTradeIncrease = 1;
+
+    /// <summary>
+    /// Most extra short packages one balancer run may accumulate through trades. Introduced with the
+    /// M8 measurement of 2026-08-13: on the newly compact plans (short shares near 0.2) the strictly
+    /// monotone short-package component blocked almost every fairness swap, and the ruin-rebuilt
+    /// plans hoarded nights (Sz3 MA-1 at 19 nights, A25 triple red). Bounded like the mixed trade —
+    /// cumulative against the origin snapshot, opened only by a real fairness gain.
+    /// </summary>
+    public const int MaxShortPackagesTradeIncrease = 1;
 
     /// <summary>
     /// Reads the numbered-rule components of one plan. Runs the full evaluation, so the plan carries
@@ -107,14 +117,15 @@ public static class ParetoFairnessGate
             && candidate.Stage1 >= current.Stage1
             && candidate.Stage2 >= current.Stage2
             && candidate.Blacklist >= current.Blacklist
-            && candidate.OverlongPackages <= current.OverlongPackages
-            && candidate.ShortPackages <= current.ShortPackages;
+            && candidate.OverlongPackages <= current.OverlongPackages;
         if (!hardRulesHold)
         {
             return false;
         }
 
-        if (candidate.BlockOrder >= current.BlockOrder && candidate.MixedPackages <= current.MixedPackages)
+        if (candidate.BlockOrder >= current.BlockOrder
+            && candidate.MixedPackages <= current.MixedPackages
+            && candidate.ShortPackages <= current.ShortPackages)
         {
             return true;
         }
@@ -127,8 +138,10 @@ public static class ParetoFairnessGate
 
         var cumulativeBlockOrderLoss = origin.BlockOrder - candidate.BlockOrder;
         var cumulativeMixedIncrease = candidate.MixedPackages - origin.MixedPackages;
+        var cumulativeShortIncrease = candidate.ShortPackages - origin.ShortPackages;
 
         return cumulativeBlockOrderLoss <= FairnessTradeRate * cumulativeFairnessGain
-            && cumulativeMixedIncrease <= MaxMixedPackagesTradeIncrease;
+            && cumulativeMixedIncrease <= MaxMixedPackagesTradeIncrease
+            && cumulativeShortIncrease <= MaxShortPackagesTradeIncrease;
     }
 }

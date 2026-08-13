@@ -57,13 +57,36 @@ public sealed class BlockCrossover : ITokenOperator
             return TokenSwapMutation.CloneScenario(parentA, parentB.Tokens.ToList());
         }
 
-        var cutPoint = context.Rng.Next(1, blocksA.Count + 1);
+        // M11e (2026-08-13): a package holding a continuation day of an open carried-in package is
+        // never part of the cut lottery — it transfers from the primary parent unconditionally.
+        // Without this the crossover could shorten a continuation the seeder had built completely
+        // (measured: one of three continuation nights lost in the evolution while every auction
+        // seed was correct), against rules A10/A11. M11f refinement (same day): the pin only
+        // covers packages within the owner's MaxWorkDays — an overgrown version must re-enter the
+        // lottery, or the pin CONSERVES its growth across generations (measured as two six-day
+        // packages under the unconditional pin).
+        var pinned = new List<CalendarPackage>();
+        var lottery = new List<CalendarPackage>();
+        foreach (var block in blocksA)
+        {
+            var touchesContinuation = block.Tokens.Any(t =>
+                string.Equals(
+                    TokenRepair.ContinuationOwnerIdOf(context.Wizard, t.Date, t.ShiftRefId),
+                    block.AgentId,
+                    StringComparison.Ordinal));
+            var withinWorkDays = !agentsById.TryGetValue(block.AgentId, out var owner)
+                || owner.MaxWorkDays <= 0
+                || block.Tokens.Select(t => t.Date).Distinct().Count() <= owner.MaxWorkDays;
+            (touchesContinuation && withinWorkDays ? pinned : lottery).Add(block);
+        }
+
+        var cutPoint = lottery.Count > 0 ? context.Rng.Next(1, lottery.Count + 1) : 0;
         var result = new List<CoreToken>();
         var usedLockedWorkIds = new HashSet<string>();
         var usedAgentKeys = new HashSet<(string, DateOnly, Guid)>();
         var slotFill = new Dictionary<(DateOnly, Guid), int>();
 
-        foreach (var block in blocksA.Take(cutPoint))
+        foreach (var block in pinned.Concat(lottery.Take(cutPoint)))
         {
             foreach (var token in block.Tokens)
             {

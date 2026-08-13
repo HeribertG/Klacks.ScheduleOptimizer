@@ -48,6 +48,8 @@ public sealed class TokenEvolutionLoop
     private const string ReassignStage = "mutation.reassign";
     private const string RepairStage = "mutation.repair";
     private const string ConsolidateStage = "mutation.consolidate";
+    private const string RuinStage = "mutation.ruin";
+    private const string SequenceStage = "mutation.sequence";
     private const string NoMutationStage = "mutation.none";
 
     private readonly TokenPopulationBuilder _populationBuilder;
@@ -58,6 +60,7 @@ public sealed class TokenEvolutionLoop
     private readonly ReassignMutation _reassign;
     private readonly TokenRepair _repair;
     private readonly PackageConsolidationMutation _consolidate = new();
+    private readonly RuinRecreateMutation _ruinRecreate;
     private readonly TopDownHandover _handover = new();
     private readonly SurplusHoursReturn _surplusReturn = new();
     private readonly ShiftKindBalancer _kindBalancer = new();
@@ -79,6 +82,7 @@ public sealed class TokenEvolutionLoop
         _merge = merge;
         _reassign = reassign;
         _repair = repair;
+        _ruinRecreate = new RuinRecreateMutation(repair);
     }
 
     public static TokenEvolutionLoop Create(TokenConstraintChecker? checker = null)
@@ -346,11 +350,16 @@ public sealed class TokenEvolutionLoop
     /// <summary>
     /// Applies one mutation drawn from the configured weights and names the operator that ran, so a
     /// diagnostics sink can attribute a structural defect to the operator instead of to the generation.
+    /// A draw above the single-operator pool plays a TRANSACTION instead: several single draws in a
+    /// row on the same child, with only the end state entering the lexicographic comparison — the
+    /// literature answer to single-move greedy attractors (SSHH sequence-end acceptance, memetic
+    /// child polishing). With MutationWeightPlaySequence 0 the single-draw path replays
+    /// byte-identically, because the same pick value walks the same cumulative chain.
     /// </summary>
     /// <param name="child">Plan to mutate</param>
     /// <param name="context">Wizard context handed to the operator</param>
-    /// <param name="rng">Random source of the run; the draw happens here and nowhere else</param>
-    /// <param name="config">Supplies the six mutation weights</param>
+    /// <param name="rng">Random source of the run; the draws happen here and nowhere else</param>
+    /// <param name="config">Supplies the mutation weights and the sequence bounds</param>
     /// <param name="repairEscalations">Optional sink for the coverage escalation of the repair operator</param>
     private (CoreScenario Scenario, string Operator) ApplyWeightedMutation(
         CoreScenario child,
@@ -359,15 +368,44 @@ public sealed class TokenEvolutionLoop
         TokenEvolutionConfig config,
         Action<string>? repairEscalations)
     {
-        var total = config.MutationWeightSwap + config.MutationWeightSplit + config.MutationWeightMerge
+        var singleTotal = config.MutationWeightSwap + config.MutationWeightSplit + config.MutationWeightMerge
                     + config.MutationWeightReassign + config.MutationWeightRepair
-                    + config.MutationWeightConsolidate;
-        if (total <= 0)
+                    + config.MutationWeightConsolidate + config.MutationWeightRuinRecreate;
+        if (singleTotal <= 0)
         {
             return (child, NoMutationStage);
         }
 
+        var total = singleTotal + config.MutationWeightPlaySequence;
         var pick = rng.NextDouble() * total;
+        if (pick < singleTotal)
+        {
+            return ApplySingleMutation(child, context, rng, config, repairEscalations, pick);
+        }
+
+        var span = config.PlaySequenceMaxSteps - config.PlaySequenceMinSteps;
+        var steps = config.PlaySequenceMinSteps + (span > 0 ? rng.Next(span + 1) : 0);
+        var current = child;
+        var origins = new List<string>(steps);
+        for (var i = 0; i < steps; i++)
+        {
+            var innerPick = rng.NextDouble() * singleTotal;
+            (current, var origin) = ApplySingleMutation(current, context, rng, config, repairEscalations, innerPick);
+            origins.Add(origin[(origin.IndexOf('.') + 1)..]);
+        }
+
+        return (current, $"{SequenceStage}[{string.Join("+", origins)}]");
+    }
+
+    /// <summary>One draw from the single-operator pool; the pick has already been scaled to the pool total.</summary>
+    private (CoreScenario Scenario, string Operator) ApplySingleMutation(
+        CoreScenario child,
+        CoreWizardContext context,
+        Random rng,
+        TokenEvolutionConfig config,
+        Action<string>? repairEscalations,
+        double pick)
+    {
         var cumulative = 0.0;
 
         cumulative += config.MutationWeightSwap;
@@ -402,7 +440,18 @@ public sealed class TokenEvolutionLoop
                 RepairStage);
         }
 
-        return (_consolidate.Apply(new TokenOperatorContext(child, null, context, rng)), ConsolidateStage);
+        cumulative += config.MutationWeightConsolidate;
+        if (pick < cumulative)
+        {
+            return (_consolidate.Apply(new TokenOperatorContext(child, null, context, rng)), ConsolidateStage);
+        }
+
+        return (
+            _ruinRecreate.Apply(
+                new TokenOperatorContext(child, null, context, rng),
+                config.RuinWindowMinDays,
+                config.RuinWindowMaxDays),
+            RuinStage);
     }
 
     /// <summary>
