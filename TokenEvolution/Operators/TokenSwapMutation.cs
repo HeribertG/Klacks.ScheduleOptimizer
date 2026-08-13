@@ -61,89 +61,22 @@ public sealed class TokenSwapMutation : ITokenOperator
         var a = tokens[firstIdx];
         var b = tokens[secondIdx];
 
-        // Each half moves to a different agent, so both need the surcharges of their NEW holder -
-        // copying them along with the assignment falsifies the Stage-1 hours account.
         var agentsById = new Dictionary<string, CoreAgent>(StringComparer.Ordinal);
         foreach (var agent in context.Wizard.Agents)
         {
             agentsById[agent.Id] = agent;
         }
 
-        var swappedA = a with
-        {
-            AgentId = b.AgentId,
-            Surcharges = SurchargeEstimator.Estimate(
-                a.TotalHours, a.ShiftTypeIndex, a.Date, agentsById.GetValueOrDefault(b.AgentId)),
-        };
-        var swappedB = b with
-        {
-            AgentId = a.AgentId,
-            Surcharges = SurchargeEstimator.Estimate(
-                b.TotalHours, b.ShiftTypeIndex, b.Date, agentsById.GetValueOrDefault(a.AgentId)),
-        };
+        var (swappedA, swappedB) = TokenTradeGuard.TradeAgents(a, b, agentsById);
         tokens[firstIdx] = swappedA;
         tokens[secondIdx] = swappedB;
 
-        if (ViolatesHardConstraints(swappedA, swappedB, tokens, agentsById, context.Wizard))
+        if (TokenTradeGuard.RejectsTrade(_stage0, swappedA, swappedB, tokens, agentsById, context.Wizard))
         {
             return CloneScenario(context.Primary, context.Primary.Tokens.ToList());
         }
 
         return CloneScenario(context.Primary, tokens);
-    }
-
-    private bool ViolatesHardConstraints(
-        CoreToken first,
-        CoreToken second,
-        IReadOnlyList<CoreToken> allTokens,
-        IReadOnlyDictionary<string, CoreAgent> agentsById,
-        CoreWizardContext wizard)
-    {
-        var othersForFirst = new List<CoreToken>(allTokens.Count - 1);
-        var othersForSecond = new List<CoreToken>(allTokens.Count - 1);
-        for (var i = 0; i < allTokens.Count; i++)
-        {
-            var t = allTokens[i];
-            if (!ReferenceEquals(t, first))
-            {
-                othersForFirst.Add(t);
-            }
-            if (!ReferenceEquals(t, second))
-            {
-                othersForSecond.Add(t);
-            }
-        }
-
-        return IsRejected(first, othersForFirst, agentsById, wizard)
-            || IsRejected(second, othersForSecond, agentsById, wizard);
-    }
-
-    private bool IsRejected(
-        CoreToken token,
-        IReadOnlyList<CoreToken> others,
-        IReadOnlyDictionary<string, CoreAgent> agentsById,
-        CoreWizardContext wizard)
-    {
-        if (_stage0.ValidateToken(token, others, wizard) != null)
-        {
-            return true;
-        }
-
-        if (!agentsById.TryGetValue(token.AgentId, out var agent))
-        {
-            return true;
-        }
-
-        return !SlotConstraintFilter.IsValidAssignment(
-            agent,
-            token.Date,
-            token.ShiftTypeIndex,
-            token.ShiftRefId,
-            token.TotalHours,
-            wizard,
-            others,
-            token.StartAt,
-            token.EndAt);
     }
 
     internal static CoreScenario CloneScenario(CoreScenario source, List<CoreToken> tokens)

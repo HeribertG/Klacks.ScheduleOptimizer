@@ -47,6 +47,7 @@ public sealed class TokenEvolutionLoop
     private const string MergeStage = "mutation.merge";
     private const string ReassignStage = "mutation.reassign";
     private const string RepairStage = "mutation.repair";
+    private const string ConsolidateStage = "mutation.consolidate";
     private const string NoMutationStage = "mutation.none";
 
     private readonly TokenPopulationBuilder _populationBuilder;
@@ -56,6 +57,7 @@ public sealed class TokenEvolutionLoop
     private readonly BlockMergeMutation _merge;
     private readonly ReassignMutation _reassign;
     private readonly TokenRepair _repair;
+    private readonly PackageConsolidationMutation _consolidate = new();
     private readonly TopDownHandover _handover = new();
     private readonly SurplusHoursReturn _surplusReturn = new();
     private readonly ShiftKindBalancer _kindBalancer = new();
@@ -348,7 +350,7 @@ public sealed class TokenEvolutionLoop
     /// <param name="child">Plan to mutate</param>
     /// <param name="context">Wizard context handed to the operator</param>
     /// <param name="rng">Random source of the run; the draw happens here and nowhere else</param>
-    /// <param name="config">Supplies the five mutation weights</param>
+    /// <param name="config">Supplies the six mutation weights</param>
     /// <param name="repairEscalations">Optional sink for the coverage escalation of the repair operator</param>
     private (CoreScenario Scenario, string Operator) ApplyWeightedMutation(
         CoreScenario child,
@@ -358,7 +360,8 @@ public sealed class TokenEvolutionLoop
         Action<string>? repairEscalations)
     {
         var total = config.MutationWeightSwap + config.MutationWeightSplit + config.MutationWeightMerge
-                    + config.MutationWeightReassign + config.MutationWeightRepair;
+                    + config.MutationWeightReassign + config.MutationWeightRepair
+                    + config.MutationWeightConsolidate;
         if (total <= 0)
         {
             return (child, NoMutationStage);
@@ -391,9 +394,15 @@ public sealed class TokenEvolutionLoop
             return (_reassign.Apply(new TokenOperatorContext(child, null, context, rng)), ReassignStage);
         }
 
-        return (
-            _repair.Apply(new TokenOperatorContext(child, null, context, rng), repairEscalations),
-            RepairStage);
+        cumulative += config.MutationWeightRepair;
+        if (pick < cumulative)
+        {
+            return (
+                _repair.Apply(new TokenOperatorContext(child, null, context, rng), repairEscalations),
+                RepairStage);
+        }
+
+        return (_consolidate.Apply(new TokenOperatorContext(child, null, context, rng)), ConsolidateStage);
     }
 
     /// <summary>

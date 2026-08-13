@@ -153,7 +153,11 @@ public static class ShortPackageTrace
         return (shortCount, totalCount);
     }
 
-    private static Dictionary<string, SortedSet<DateOnly>> DatesByAgent(
+    /// <summary>
+    /// Occupied calendar days per agent in the package reading (day a shift starts on), boundary
+    /// works included. Internal because the package-consolidation mutation asks the same question.
+    /// </summary>
+    internal static Dictionary<string, SortedSet<DateOnly>> DatesByAgent(
         CoreScenario scenario, CoreWizardContext context)
     {
         var datesByAgent = new Dictionary<string, SortedSet<DateOnly>>(StringComparer.Ordinal);
@@ -187,7 +191,7 @@ public static class ShortPackageTrace
         dates.Add(date);
     }
 
-    private static IEnumerable<(DateOnly Start, DateOnly End)> Runs(SortedSet<DateOnly> dates)
+    internal static IEnumerable<(DateOnly Start, DateOnly End)> Runs(SortedSet<DateOnly> dates)
     {
         DateOnly? start = null;
         DateOnly previous = default;

@@ -32,6 +32,9 @@ public sealed record TokenEvolutionConfig
 
     public double MutationWeightRepair { get; init; } = 0.25;
 
+    /// <summary>Weight of the package-consolidation trade (rule 6): dissolves a short package through an equal-hours swap onto a date that extends another package of the same agent. Additive to the other five weights, so their mutual ratios stay untouched; 0 removes the operator and reproduces the pre-operator draw sequence.</summary>
+    public double MutationWeightConsolidate { get; init; } = 0.15;
+
     public int EarlyStopNoImprovementGenerations { get; init; } = 30;
 
     public int RandomSeed { get; init; } = 0;
