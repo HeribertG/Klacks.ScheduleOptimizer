@@ -13,6 +13,8 @@ namespace Klacks.ScheduleOptimizer.Verdict;
 /// finished candidates afterwards. Packages are the maximal runs of occupied calendar days the
 /// short-package trace already defines (boundary works included, breaks excluded); rest gaps are
 /// measured hour-exact from token times, boundary days without times count as full occupied days.
+/// Day-to-day turnarounds inside a package are judged against the agent's daily rest
+/// (MinRestHours); day pairs without token times are skipped there — no measuring base, no guess.
 /// Soft terms reward structure; rest quotas and the legal minimum never add — they only cap.
 /// A plan without any occupied day is vacuously clean: coverage is the engine's hard guarantee
 /// and deliberately not part of the verdict.
@@ -51,7 +53,8 @@ public static class PlanVerdictCalculator
         foreach (var (agentId, dates) in ShortPackageTrace.DatesByAgent(scenario, context))
         {
             agentsById.TryGetValue(agentId, out var agent);
-            var runs = ShortPackageTrace.Runs(dates)
+            var dayRuns = ShortPackageTrace.Runs(dates).ToList();
+            var runs = dayRuns
                 .Select(run => RunWindow(agentId, run, timesByAgentDay))
                 .ToList();
             if (runs.Count == 0)
@@ -87,7 +90,31 @@ public static class PlanVerdictCalculator
 
             gaps.Add(Math.Max(0, (periodEnd - runs[^1].LastEnd).TotalHours));
 
-            var quota = cfg.RestQuotas.FirstOrDefault(q => q.WindowHours == requiredRestHours);
+            var dailyRestHours = agent?.MinRestHours ?? 0;
+            if (dailyRestHours > 0)
+            {
+                foreach (var dayRun in dayRuns)
+                {
+                    for (var day = dayRun.Start; day < dayRun.End; day = day.AddDays(1))
+                    {
+                        if (!timesByAgentDay.TryGetValue((agentId, day), out var earlier) ||
+                            !timesByAgentDay.TryGetValue((agentId, day.AddDays(1)), out var later))
+                        {
+                            continue;
+                        }
+
+                        var turnaroundHours = (later.MinStart - earlier.MaxEnd).TotalHours;
+                        if (turnaroundHours < dailyRestHours)
+                        {
+                            findings.Add(new VerdictFinding(
+                                agentId, earlier.MaxEnd, later.MinStart, turnaroundHours,
+                                dailyRestHours, VerdictFindingKind.DailyRestBreach));
+                        }
+                    }
+                }
+            }
+
+            var quota = cfg.QuotaFor(requiredRestHours);
             if (quota is not null)
             {
                 var required = quota.RequiredWindows(periodDays, cfg.ReferencePeriodDays);
@@ -113,7 +140,8 @@ public static class PlanVerdictCalculator
 
         var minFulfillment = quotas.Count == 0 ? 1 : quotas.Min(q => q.Fulfillment);
         var quotaCap = cfg.QuotaShortfallCapFloor + ((1 - cfg.QuotaShortfallCapFloor) * minFulfillment);
-        var hasLegalBreach = findings.Any(f => f.Kind == VerdictFindingKind.LegalMinimumBreach);
+        var hasLegalBreach = findings.Any(
+            f => f.Kind is VerdictFindingKind.LegalMinimumBreach or VerdictFindingKind.DailyRestBreach);
 
         var score = Math.Min(softScore - scratchDeduction, quotaCap);
         if (hasLegalBreach)
