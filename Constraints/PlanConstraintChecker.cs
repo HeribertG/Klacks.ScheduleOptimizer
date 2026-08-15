@@ -29,6 +29,7 @@ public sealed class PlanConstraintChecker
         CheckWorkOnDay(assignments, eval, violations);
         CheckPerformsShiftWork(assignments, eval, violations);
         CheckPerDayKeyword(assignments, eval, violations);
+        CheckShiftBlacklist(assignments, eval, violations);
         CheckBreakBlocker(assignments, eval, violations);
         CheckMaxConsecutiveDays(assignments, context, eval, violations);
         var externalIntervals = BuildExternalIntervalsByAgent(assignments, context);
@@ -141,6 +142,28 @@ public sealed class PlanConstraintChecker
         ScheduleCommandKeyword.NoNight => shiftTypeIndex == 2,
         _ => false,
     };
+
+    private static void CheckShiftBlacklist(IReadOnlyList<AssignmentView> assignments, EvaluationContext eval, List<ConstraintViolation> violations)
+    {
+        foreach (var a in assignments)
+        {
+            if (a.ShiftRefId == Guid.Empty)
+            {
+                continue;
+            }
+
+            if (eval.BlacklistedShiftsByAgent.TryGetValue(a.AgentId, out var blacklisted)
+                && blacklisted.Contains(a.ShiftRefId))
+            {
+                violations.Add(new ConstraintViolation(
+                    ViolationKind.ShiftBlacklistViolation,
+                    a.AgentId,
+                    a.Date,
+                    a.BlockId,
+                    $"Agent {a.AgentId} is blacklisted from shift {a.ShiftRefId}."));
+            }
+        }
+    }
 
     private static void CheckBreakBlocker(IReadOnlyList<AssignmentView> assignments, EvaluationContext eval, List<ConstraintViolation> violations)
     {

@@ -22,4 +22,5 @@ public enum ViolationKind
     QualificationMissing,
     Overlap,
     ExistingWorkOverlap,
+    ShiftBlacklistViolation,
 }

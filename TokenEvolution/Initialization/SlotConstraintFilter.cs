@@ -21,7 +21,7 @@ public static class SlotConstraintFilter
     /// <see cref="SlotRelaxation.All"/> lets the MaxWorkDays block ideal step aside — the last resort
     /// of the escalation, because coverage is the highest rule of the specification and the block
     /// ideal is not. No rung touches a hard rule: the MaxConsecutiveDays cap, collisions, bans,
-    /// keywords, breaks, hour caps, the minimum pause, the restricted windows AND the package rest
+    /// keywords, the shift blacklist, breaks, hour caps, the minimum pause, the restricted windows AND the package rest
     /// (MinRestDays as hours, owner ruling 2026-08-12) veto on every rung —
     /// <see cref="SlotRelaxation.RestDaysOnly"/> is a historic no-op rung since that ruling.
     /// </summary>
@@ -70,6 +70,11 @@ public static class SlotConstraintFilter
         }
 
         if (!RespectsKeyword(agent.Id, date, shiftTypeIndex, context.ScheduleCommands))
+        {
+            return false;
+        }
+
+        if (shiftRefId != Guid.Empty && IsBlacklistedShift(agent.Id, shiftRefId, context.ShiftPreferences))
         {
             return false;
         }
@@ -660,6 +665,21 @@ public static class SlotConstraintFilter
         foreach (var blocker in blockers)
         {
             if (blocker.AgentId == agentId && date >= blocker.FromInclusive && date <= blocker.UntilInclusive)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsBlacklistedShift(string agentId, Guid shiftRefId, IReadOnlyList<CoreShiftPreference> preferences)
+    {
+        foreach (var preference in preferences)
+        {
+            if (preference.AgentId == agentId
+                && preference.ShiftRefId == shiftRefId
+                && preference.Kind == ShiftPreferenceKind.Blacklist)
             {
                 return true;
             }

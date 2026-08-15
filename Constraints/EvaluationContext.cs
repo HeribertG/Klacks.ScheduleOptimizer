@@ -25,6 +25,7 @@ public sealed class EvaluationContext
         ContractDayByAgentDate = BuildContractDays(context);
         CommandsByAgentDate = BuildCommands(context);
         BreakBlockersByAgent = BuildBreakBlockers(context);
+        BlacklistedShiftsByAgent = BuildBlacklists(context);
         AgentsWithMaximumHours = context.Agents.Where(a => a.MaximumHours > 0).ToList();
         (SlotCapacities, SlotsByKey, LocationContextByShift) = BuildSlots(context);
     }
@@ -44,6 +45,9 @@ public sealed class EvaluationContext
 
     /// <summary>Break blockers per agent, so a check no longer scans every blocker for every assignment.</summary>
     public IReadOnlyDictionary<string, List<CoreBreakBlocker>> BreakBlockersByAgent { get; }
+
+    /// <summary>Blacklisted shift definitions per agent, for the hard shift-preference veto.</summary>
+    public IReadOnlyDictionary<string, HashSet<Guid>> BlacklistedShiftsByAgent { get; }
 
     /// <summary>Agents carrying a maximum-hours cap, in the order of the context's agent list.</summary>
     public IReadOnlyList<CoreAgent> AgentsWithMaximumHours { get; }
@@ -117,6 +121,28 @@ public sealed class EvaluationContext
             }
 
             list.Add(blocker);
+        }
+
+        return result;
+    }
+
+    private static Dictionary<string, HashSet<Guid>> BuildBlacklists(CoreWizardContext context)
+    {
+        var result = new Dictionary<string, HashSet<Guid>>(StringComparer.Ordinal);
+        foreach (var preference in context.ShiftPreferences)
+        {
+            if (preference.Kind != ShiftPreferenceKind.Blacklist)
+            {
+                continue;
+            }
+
+            if (!result.TryGetValue(preference.AgentId, out var set))
+            {
+                set = [];
+                result[preference.AgentId] = set;
+            }
+
+            set.Add(preference.ShiftRefId);
         }
 
         return result;
