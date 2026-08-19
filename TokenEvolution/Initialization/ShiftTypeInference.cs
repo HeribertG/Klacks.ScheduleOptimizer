@@ -34,7 +34,7 @@ public static class ShiftTypeInference
     /// <summary>
     /// Classifies a shift by its span. The end is exclusive, so a shift ending exactly at 15:00 stays
     /// early - its last worked minute is 14:59. An end that is not after the start means the shift runs
-    /// past midnight.
+    /// past midnight, equal bounds included: those span a full 24 hours and therefore count as night.
     /// </summary>
     /// <param name="start">Start time of day.</param>
     /// <param name="end">End time of day, exclusive.</param>
@@ -43,12 +43,9 @@ public static class ShiftTypeInference
         var startMinute = ToMinute(start);
         var endMinute = ToMinute(end);
 
-        if (startMinute == endMinute)
-        {
-            return FromStartTime(start);
-        }
-
         // A span that ends at or before it starts wraps past midnight and becomes two intervals.
+        // Equal bounds are the full-day case: a 07:00-07:00 duty covers the whole night and is
+        // night work, per owner ruling 2026-08-19.
         var spans = endMinute > startMinute
             ? new[] { (startMinute, endMinute), (0, 0) }
             : [(startMinute, MinutesPerDay), (0, endMinute)];

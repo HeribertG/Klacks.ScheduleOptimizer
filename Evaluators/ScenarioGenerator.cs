@@ -93,14 +93,12 @@ public static class ScenarioGenerator
                 continue;
             }
 
-            var startAt = date.ToDateTime(TimeOnly.Parse(shift.StartTime));
-            var endParts = shift.EndTime.Split(':');
-            var endHour = int.Parse(endParts[0]);
-            var endMinute = int.Parse(endParts[1]);
-            var startHour = int.Parse(shift.StartTime.Split(':')[0]);
-            var endAt = endHour < startHour
-                ? date.AddDays(1).ToDateTime(new TimeOnly(endHour, endMinute))
-                : date.ToDateTime(new TimeOnly(endHour, endMinute));
+            var startTime = TimeOnly.Parse(shift.StartTime);
+            var endTime = TimeOnly.Parse(shift.EndTime);
+            var startAt = date.ToDateTime(startTime);
+            var endAt = endTime <= startTime
+                ? date.AddDays(1).ToDateTime(endTime)
+                : date.ToDateTime(endTime);
 
             for (var attempt = 0; attempt < agents.Count; attempt++)
             {
