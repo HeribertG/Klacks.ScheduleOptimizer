@@ -59,18 +59,33 @@ public record CoreAgent(
 
     public bool WorkOnSunday { get; init; } = false;
 
-    /// <summary>Surcharge percentage for night shifts (e.g. 25 = 25%). Used by the wizard for rough surcharge estimation toward GuaranteedHours.</summary>
+    /// <summary>Surcharge rate for night shifts, read through NightRateMode (Multiplier: fraction, e.g. 0.10 = 10%; otherwise an absolute amount). Used by the wizard for rough surcharge estimation toward GuaranteedHours.</summary>
     public decimal NightRate { get; init; } = 0;
 
-    /// <summary>Surcharge percentage for holiday shifts.</summary>
+    /// <summary>Surcharge rate for holiday shifts, read through HolidayRateMode.</summary>
     public decimal HolidayRate { get; init; } = 0;
 
-    /// <summary>Surcharge percentage for the 1st configured weekend day (country-neutral weekend slot).</summary>
+    /// <summary>Surcharge rate for the 1st configured weekend day (country-neutral weekend slot), read through WE1RateMode.</summary>
     public decimal WE1Rate { get; init; } = 0;
 
-    /// <summary>Surcharge percentage for the 2nd configured weekend day (country-neutral weekend slot).</summary>
+    /// <summary>Surcharge rate for the 2nd configured weekend day (country-neutral weekend slot), read through WE2RateMode.</summary>
     public decimal WE2Rate { get; init; } = 0;
 
-    /// <summary>Surcharge percentage for the 3rd configured weekend day (country-neutral weekend slot).</summary>
+    /// <summary>Surcharge rate for the 3rd configured weekend day (country-neutral weekend slot), read through WE3RateMode.</summary>
     public decimal WE3Rate { get; init; } = 0;
+
+    /// <summary>How NightRate is to be interpreted. Defaults to Multiplier, matching the contract default.</summary>
+    public CoreSurchargeRateMode NightRateMode { get; init; } = CoreSurchargeRateMode.Multiplier;
+
+    /// <summary>How HolidayRate is to be interpreted.</summary>
+    public CoreSurchargeRateMode HolidayRateMode { get; init; } = CoreSurchargeRateMode.Multiplier;
+
+    /// <summary>How WE1Rate is to be interpreted.</summary>
+    public CoreSurchargeRateMode WE1RateMode { get; init; } = CoreSurchargeRateMode.Multiplier;
+
+    /// <summary>How WE2Rate is to be interpreted.</summary>
+    public CoreSurchargeRateMode WE2RateMode { get; init; } = CoreSurchargeRateMode.Multiplier;
+
+    /// <summary>How WE3Rate is to be interpreted.</summary>
+    public CoreSurchargeRateMode WE3RateMode { get; init; } = CoreSurchargeRateMode.Multiplier;
 }
