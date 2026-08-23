@@ -20,7 +20,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// rests in the child. A calendar package transfers whole or not at all, so an omission leaves a
 /// coverage HOLE for the package-aware sweep to refill instead of a splinter.
 /// </para>
-/// Locked tokens appear exactly once regardless of source.
+/// Locked tokens appear exactly once regardless of source: they are lifted out of parent A before the
+/// package decomposition and put into the child unconditionally, so no all-or-nothing package rejection
+/// can drop one; parent B's copies never enter the exchange at all.
 /// </summary>
 /// <param name="stage0">Hard-constraint checker used to filter parent-B blocks that would
 /// introduce hard violations (MinPauseHours, MaxDailyHours, MaxConsecutiveDays, cross-day overlap).</param>
@@ -50,11 +52,21 @@ public sealed class BlockCrossover : ITokenOperator
             agentsById[agent.Id] = agent;
         }
 
-        var blocksA = CalendarPackages(parentA.Tokens);
+        // Locked tokens are identical in every individual - there is nothing to cross over - and a
+        // calendar package that spans the ReplanFrom seam mixes them with free tokens. Leaving them
+        // inside the packages let the all-or-nothing transfer drop a frozen assignment together with
+        // the rejected free tail; the coverage repair then refilled the hole with IsLocked = false.
+        // Pulling them out before the decomposition makes the guarantee below constructively true.
+        var lockedTokens = parentA.Tokens.Where(t => t.IsLocked).ToList();
+        var blocksA = CalendarPackages(parentA.Tokens.Where(t => !t.IsLocked).ToList());
 
         if (blocksA.Count == 0)
         {
-            return TokenSwapMutation.CloneScenario(parentA, parentB.Tokens.ToList());
+            var fallback = new List<CoreToken>(lockedTokens);
+            fallback.AddRange(lockedTokens.Count == 0
+                ? parentB.Tokens
+                : parentB.Tokens.Where(t => !t.IsLocked));
+            return TokenSwapMutation.CloneScenario(parentA, fallback);
         }
 
         // M11e (2026-08-13): a package holding a continuation day of an open carried-in package is
@@ -81,10 +93,15 @@ public sealed class BlockCrossover : ITokenOperator
         }
 
         var cutPoint = lottery.Count > 0 ? context.Rng.Next(1, lottery.Count + 1) : 0;
-        var result = new List<CoreToken>();
+        var result = new List<CoreToken>(lockedTokens);
         var usedLockedWorkIds = new HashSet<string>();
         var usedAgentKeys = new HashSet<(string, DateOnly, Guid)>();
         var slotFill = new Dictionary<(DateOnly, Guid), int>();
+
+        foreach (var token in lockedTokens)
+        {
+            TrackToken(token, usedAgentKeys, usedLockedWorkIds, slotFill);
+        }
 
         foreach (var block in pinned.Concat(lottery.Take(cutPoint)))
         {
@@ -95,7 +112,7 @@ public sealed class BlockCrossover : ITokenOperator
             }
         }
 
-        var parentBBlocks = CalendarPackages(parentB.Tokens);
+        var parentBBlocks = CalendarPackages(parentB.Tokens.Where(t => !t.IsLocked).ToList());
 
         foreach (var block in parentBBlocks)
         {
