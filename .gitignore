@@ -4,3 +4,7 @@ Reports/*.json
 Reports/*.md
 !Reports/.gitignore
 *.user
+
+# Local build scratch directories
+.build-etappe5a/
+obj-gaps/
