@@ -1,4 +1,4 @@
-// Copyright (c) Heribert Gasparoli Private. All rights reserved.
+// Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 /// <summary>
 /// Per-day planning command from the schedule cell (FREE / -FREE / EARLY / -EARLY / LATE / -LATE / NIGHT / -NIGHT).
