@@ -32,4 +32,9 @@ public interface IPlanProposalProvider
 /// <param name="IsHealthy">True only when the model returned a parseable JSON ping response.</param>
 /// <param name="LatencyMs">Round-trip time in milliseconds.</param>
 /// <param name="Error">Failure reason when <see cref="IsHealthy"/> is false; null on success.</param>
-public sealed record PlanProposalPingResult(bool IsHealthy, long LatencyMs, string? Error);
+/// <param name="AnsweredButFailedImageCheck">
+/// True only when the model did answer the vision capability check but did not read the image token back -
+/// the one outcome that proves the model cannot read the schedule image. A timeout, an unavailable provider,
+/// a rejected request or an exception leave it false: they say nothing about the model's vision capability.
+/// </param>
+public sealed record PlanProposalPingResult(bool IsHealthy, long LatencyMs, string? Error, bool AnsweredButFailedImageCheck = false);
