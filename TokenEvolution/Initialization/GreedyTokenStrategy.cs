@@ -205,8 +205,10 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                 continue;
             }
 
-            if (requireValid &&
-                !SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, shiftRefId, slotHours, context, tokensSoFar, slotStartUtc, slotEndUtc))
+            var admissible = requireValid
+                ? SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, shiftRefId, slotHours, context, tokensSoFar, slotStartUtc, slotEndUtc)
+                : !WeeklyRestDayGuard.Violates(agent, slotDate, tokensSoFar, context, slotStartUtc, slotEndUtc);
+            if (!admissible)
             {
                 continue;
             }

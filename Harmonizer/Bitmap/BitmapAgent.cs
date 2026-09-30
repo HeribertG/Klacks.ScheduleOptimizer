@@ -10,6 +10,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// <param name="MaxConsecutiveDays">Maximum consecutive working days from the active contract; 0 = unconstrained</param>
 /// <param name="MinPauseHours">Minimum rest hours between two work spans from the active contract; 0 = unconstrained</param>
 /// <param name="BlacklistedShiftIds">Set of Shift ids the agent must not be assigned to (ClientShiftPreference Blacklist)</param>
+/// <param name="MinRestDays">Minimum rest days per calendar week, rounded up; 0 = unconstrained</param>
 public sealed record BitmapAgent(
     string Id,
     string DisplayName,
@@ -18,4 +19,5 @@ public sealed record BitmapAgent(
     decimal MaxWeeklyHours = 0m,
     int MaxConsecutiveDays = 0,
     decimal MinPauseHours = 0m,
-    IReadOnlySet<Guid>? BlacklistedShiftIds = null);
+    IReadOnlySet<Guid>? BlacklistedShiftIds = null,
+    int MinRestDays = 0);

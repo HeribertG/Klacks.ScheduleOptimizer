@@ -11,8 +11,9 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// Hard-constraint layer for Holistic Harmonizer. Wraps the Wizard 2 <see cref="DomainAwareReplaceValidator"/>
 /// for same-day swaps and applies cheap pre-checks (bounds, locks, no-op) before delegating.
 /// Cross-day swaps (DayA != DayB) are admitted when coverage-neutral — i.e. both cells share the
-/// same work-or-free state so the daily head-count on each affected day stays unchanged. The
-/// per-row constraint check (max-consec, min-pause) for cross-day is delegated to the
+/// same work-or-free state so the daily head-count on each affected day stays unchanged. The weekly
+/// rest days of the schedule check are enforced hard on both receiving rows of a cross-day swap. The
+/// remaining per-row constraint checks (max-consec, min-pause) for cross-day are delegated to the
 /// constraint-agent committee plus score-greedy because <c>DomainAwareReplaceValidator</c> is
 /// scoped to single-day swaps; this is an explicit trade-off documented in the spec.
 /// </summary>
@@ -107,6 +108,12 @@ public sealed class PlanMutationValidator
             {
                 return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, eligibilityB);
             }
+
+            var restDayIssue = DiagnoseCrossDayWeeklyRestDays(bitmap, swap, cellA, cellB, crossDayAgentA, crossDayAgentB);
+            if (restDayIssue is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, restDayIssue);
+            }
         }
 
         if (!crossDay)
@@ -123,6 +130,23 @@ public sealed class PlanMutationValidator
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Weekly rest days of a cross-day swap. Two different rows are judged per receiving row; a swap of two
+    /// cells within ONE row is judged on the combined effect of both moved cells.
+    /// </summary>
+    private string? DiagnoseCrossDayWeeklyRestDays(
+        HarmonyBitmap bitmap, PlanCellSwap swap, Cell cellA, Cell cellB, BitmapAgent agentA, BitmapAgent agentB)
+    {
+        if (swap.RowA == swap.RowB)
+        {
+            return _domainValidator.DiagnoseWeeklyRestDays(
+                bitmap, swap.RowA, agentA, [(swap.DayA, cellB), (swap.DayB, cellA)], "rowA");
+        }
+
+        return _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowA, agentA, swap.DayA, cellB, "rowA")
+            ?? _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowB, agentB, swap.DayB, cellA, "rowB");
     }
 
     private static bool IsWork(CellSymbol symbol)

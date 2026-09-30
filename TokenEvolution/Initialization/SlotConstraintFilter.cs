@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Common.RestDays;
 using Klacks.ScheduleOptimizer.Models;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
@@ -21,8 +22,9 @@ public static class SlotConstraintFilter
     /// <see cref="SlotRelaxation.All"/> lets the MaxWorkDays block ideal step aside — the last resort
     /// of the escalation, because coverage is the highest rule of the specification and the block
     /// ideal is not. No rung touches a hard rule: the MaxConsecutiveDays cap, collisions, bans,
-    /// keywords, the shift blacklist, breaks, hour caps, the minimum pause, the restricted windows AND the package rest
-    /// (MinRestDays as hours, owner ruling 2026-08-12) veto on every rung —
+    /// keywords, the shift blacklist, breaks, hour caps, the minimum pause, the restricted windows, the package rest
+    /// (MinRestDays as hours, owner ruling 2026-08-12) AND the weekly rest days of the schedule check
+    /// (<see cref="WeeklyRestDayGuard"/>) veto on every rung —
     /// <see cref="SlotRelaxation.RestDaysOnly"/> is a historic no-op rung since that ruling.
     /// </summary>
     public static bool IsValidAssignment(
@@ -117,7 +119,7 @@ public static class SlotConstraintFilter
             }
         }
 
-        return true;
+        return !WeeklyRestDayGuard.Violates(agent, date, alreadyAssigned, context, slotStartUtc, slotEndUtc);
     }
 
     // K16 seasonal daily forbidden-time window. Always a hard veto (like a break blocker), independent of
@@ -339,9 +341,6 @@ public static class SlotConstraintFilter
         return false;
     }
 
-    /// <summary>Owner ruling 2026-08-12: one configured rest day between packages equals 24 hours.</summary>
-    private const int HoursPerRestDay = 24;
-
     /// <summary>
     /// Rest between two packages, measured in HOURS: the configured MinRestDays times 24, from the end
     /// of the last shift of one package to the start of the first shift of the next (owner ruling
@@ -370,7 +369,7 @@ public static class SlotConstraintFilter
         // package extension although it opens a NEW package after far too little rest.
         var hasPrev = StartsOnDate(agent.Id, date.AddDays(-1), assigned, context);
         var hasNext = StartsOnDate(agent.Id, date.AddDays(+1), assigned, context);
-        var requiredRestHours = agent.MinRestDays * (double)HoursPerRestDay;
+        var requiredRestHours = CalendarWeekRestDays.MinimumFreeBlock(agent.MinRestDays).TotalHours;
 
         if (!hasPrev)
         {

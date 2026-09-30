@@ -9,11 +9,14 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 /// Stage 0 — Tabu. These rules can NEVER be broken: availability, contract weekday,
 /// FREE keyword, MaxDailyHours (per-agent), MinPauseHours (per-agent), MaxConsecutiveDays
 /// (per-agent hard cap on block length), double-booking (incl. cross-day overnight overlap),
-/// existing-work overlap. If all candidates fail here for a slot, the slot stays unassigned
+/// existing-work overlap, the weekly rest days of the schedule check (<see cref="WeeklyRestDayGuard"/>).
+/// If all candidates fail here for a slot, the slot stays unassigned
 /// and the dispatcher must intervene.
 /// </summary>
 public sealed class Stage0HardConstraintChecker
 {
+    private const string WeeklyRestDaysRule = "WeeklyRestDays";
+
     /// <summary>
     /// Validates an entire scenario by re-running the per-slot Stage 0 check for every
     /// non-locked token against the rest of the tokens. Used by GA operators (swap, crossover,
@@ -222,7 +225,26 @@ public sealed class Stage0HardConstraintChecker
                 $"Shift {slot.Id} on {date.Value:yyyy-MM-dd} at {slot.StartTime}-{slot.EndTime} falls inside a seasonal restricted time window.");
         }
 
+        if (ViolatesWeeklyRestDays(agent, slot, date.Value, alreadyAssigned, context))
+        {
+            return new VetoVerdict(0, WeeklyRestDaysRule,
+                $"Agent {agent.Id} would keep fewer than {agent.MinRestDays} rest day(s) in a calendar week touched by {slot.StartTime}-{slot.EndTime} on {date.Value:yyyy-MM-dd}.");
+        }
+
         return null;
+    }
+
+    private static bool ViolatesWeeklyRestDays(
+        CoreAgent agent, CoreShift slot, DateOnly date, IReadOnlyList<CoreToken> alreadyAssigned, CoreWizardContext context)
+    {
+        var hasInterval = TryGetSlotInterval(slot, date, out var slotStart, out var slotEnd);
+        return WeeklyRestDayGuard.Violates(
+            agent,
+            date,
+            alreadyAssigned,
+            context,
+            hasInterval ? slotStart : null,
+            hasInterval ? slotEnd : null);
     }
 
     // K16 seasonal daily forbidden-time window - mirrors SlotConstraintFilter. Always a hard veto,

@@ -8,8 +8,9 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// <summary>
 /// Hybrid validator that combines bitmap-local checks (locks, indices, self-swap) with
 /// hard domain constraints lifted from Wizard 1: contract WorksOnDay, FREE-Keyword,
-/// BreakBlocker, ClientShiftPreference Blacklist, MaxConsecutiveDays, MaxWeeklyHours and
-/// MinPauseHours. Operates on the bitmap directly without converting to tokens.
+/// BreakBlocker, ClientShiftPreference Blacklist, MaxConsecutiveDays, MaxWeeklyHours,
+/// MinPauseHours and the weekly rest days of the schedule check (<see cref="BitmapWeeklyRestDayGuard"/>).
+/// Operates on the bitmap directly without converting to tokens.
 /// </summary>
 /// <param name="availability">Per (agent, date) availability map, supplied by the context builder</param>
 /// <param name="boundaryAssignments">
@@ -23,6 +24,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
     private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
     private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _ineligibleAssignments;
+    private readonly BitmapWeeklyRestDayGuard _weeklyRestDays;
 
     public DomainAwareReplaceValidator(
         IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? availability,
@@ -32,6 +34,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         _availability = availability ?? new Dictionary<(string, DateOnly), DayAvailability>();
         _ineligibleAssignments = ineligibleAssignments ?? new HashSet<(string, Guid, DateOnly)>();
         _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
+        _weeklyRestDays = new BitmapWeeklyRestDayGuard(boundaryAssignments);
         if (boundaryAssignments is not null)
         {
             foreach (var assignment in boundaryAssignments)
@@ -198,7 +201,26 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             return $"{roleLabel} {receivingAgent.DisplayName}: {weeklyIssue}";
         }
 
-        return null;
+        return DiagnoseWeeklyRestDays(bitmap, receivingRow, receivingAgent, dayIndex, incomingCell, roleLabel);
+    }
+
+    /// <summary>
+    /// Null when the row may receive the cell on the bitmap day under the weekly rest-day rule, otherwise a
+    /// short reason. Public so Wizard 3's PlanMutationValidator applies the same check on its cross-day branch.
+    /// </summary>
+    public string? DiagnoseWeeklyRestDays(
+        HarmonyBitmap bitmap, int receivingRow, BitmapAgent receivingAgent, int dayIndex, Cell incomingCell, string roleLabel)
+        => DiagnoseWeeklyRestDays(bitmap, receivingRow, receivingAgent, [(dayIndex, incomingCell)], roleLabel);
+
+    /// <summary>
+    /// Weekly rest-day check for several cells of ONE row changing at once - a cross-day swap whose two
+    /// cells belong to the same row must be judged on its combined effect, not per cell.
+    /// </summary>
+    public string? DiagnoseWeeklyRestDays(
+        HarmonyBitmap bitmap, int row, BitmapAgent agent, IReadOnlyList<(int Day, Cell Cell)> replacements, string roleLabel)
+    {
+        var restDayIssue = _weeklyRestDays.Diagnose(bitmap, row, agent, replacements);
+        return restDayIssue is null ? null : $"{roleLabel} {agent.DisplayName}: {restDayIssue}";
     }
 
     private static int IndexOfDate(IReadOnlyList<DateOnly> days, DateOnly date)
