@@ -25,7 +25,7 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
             LockedTokenFactory.BuildLockedTokens(context.LockedWorks, context.SchedulingMaxConsecutiveDays));
         var seed = CarryInContinuationSeeder.Seed(context, tokens);
 
-        var remainingSlots = context.Shifts.Where(slot => !seed.Occupancy.IsSatisfied(slot)).ToList();
+        var remainingSlots = context.Shifts.Where(slot => !seed.Occupancy.TryClaim(slot)).ToList();
         var hoursAssigned = new Dictionary<string, double>();
         foreach (var agent in context.Agents)
         {

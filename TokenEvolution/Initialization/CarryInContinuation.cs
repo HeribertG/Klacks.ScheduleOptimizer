@@ -37,7 +37,7 @@ public static class CarryInContinuation
 
             foreach (var slot in slots)
             {
-                if (!occupancy.IsSatisfied(slot))
+                if (!occupancy.TryClaim(slot))
                 {
                     return day;
                 }

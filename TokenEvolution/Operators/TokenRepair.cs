@@ -305,7 +305,9 @@ public sealed class TokenRepair : ITokenOperator
             return false;
         }
 
-        var capacity = Math.Max(1, slot.RequiredAssignments);
+        var capacity = EvaluationContext.For(wizard).SlotCapacities.GetValueOrDefault(
+            (violation.ShiftRefId.Value, violation.Date.Value),
+            Math.Max(1, slot.RequiredAssignments));
         var assigned = 0;
         foreach (var token in primary.Tokens)
         {

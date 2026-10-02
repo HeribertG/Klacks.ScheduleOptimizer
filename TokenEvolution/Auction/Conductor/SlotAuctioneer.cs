@@ -77,7 +77,7 @@ public sealed class SlotAuctioneer
         {
             // A slot already staffed by a locked work or by the carry-in pre-pass is not for sale;
             // auctioning it a second time would put two employees on one place.
-            if (seed.Occupancy.IsSatisfied(slot))
+            if (seed.Occupancy.TryClaim(slot))
             {
                 continue;
             }

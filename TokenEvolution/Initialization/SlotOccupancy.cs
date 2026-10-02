@@ -16,6 +16,7 @@ public sealed class SlotOccupancy
     private const int MinimumRequiredAssignments = 1;
 
     private readonly Dictionary<(DateOnly Date, Guid ShiftRefId), int> _counts;
+    private readonly Dictionary<(DateOnly Date, Guid ShiftRefId), int> _claimed = new();
 
     private SlotOccupancy(Dictionary<(DateOnly Date, Guid ShiftRefId), int> counts) => _counts = counts;
 
@@ -71,6 +72,34 @@ public sealed class SlotOccupancy
 
         return _counts.GetValueOrDefault((date, shiftRefId), 0)
             >= Math.Max(MinimumRequiredAssignments, requiredAssignments);
+    }
+
+    /// <summary>
+    /// Claims pre-placed assignments for ONE slot instance. A shift day with several seats is expanded into several
+    /// slot instances of the same (date, shift); each pre-placed assignment covers exactly one of them, so a caller
+    /// walking the slot instances skips only as many as there are assignments. Returns true when this instance is
+    /// covered and must not be staffed again.
+    /// </summary>
+    /// <param name="slot">Slot instance to claim; an unparseable date or shift id is never covered</param>
+    public bool TryClaim(CoreShift slot)
+    {
+        if (!Guid.TryParse(slot.Id, out var shiftRefId)
+            || shiftRefId == Guid.Empty
+            || !DateOnly.TryParse(slot.Date, out var date))
+        {
+            return false;
+        }
+
+        var key = (date, shiftRefId);
+        var demand = Math.Max(MinimumRequiredAssignments, slot.RequiredAssignments);
+        var unclaimed = _counts.GetValueOrDefault(key, 0) - _claimed.GetValueOrDefault(key, 0);
+        if (unclaimed < demand)
+        {
+            return false;
+        }
+
+        _claimed[key] = _claimed.GetValueOrDefault(key, 0) + demand;
+        return true;
     }
 
     /// <summary>Records one further assignment on the slot.</summary>

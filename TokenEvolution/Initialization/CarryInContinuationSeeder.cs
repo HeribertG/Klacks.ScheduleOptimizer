@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
@@ -96,10 +97,13 @@ public static class CarryInContinuationSeeder
         CoreShift? sameOrder = null;
         CoreShift? sameKind = null;
 
+        var shiftDayCapacities = EvaluationContext.For(context).SlotCapacities;
+
         foreach (var slot in slots)
         {
             if (!Guid.TryParse(slot.Id, out var shiftRefId)
-                || occupancy.IsSatisfied(day, shiftRefId, slot.RequiredAssignments)
+                || occupancy.IsSatisfied(
+                    day, shiftRefId, shiftDayCapacities.GetValueOrDefault((shiftRefId, day), slot.RequiredAssignments))
                 || ShiftTypeInference.FromSpanString(slot.StartTime, slot.EndTime) != package.ShiftTypeIndex)
             {
                 continue;

@@ -39,7 +39,7 @@ public sealed class CoverageFirstTokenStrategy : ITokenPopulationStrategy
 
         foreach (var slot in orderedSlots)
         {
-            if (seed.Occupancy.IsSatisfied(slot) || !DateOnly.TryParse(slot.Date, out var slotDate))
+            if (seed.Occupancy.TryClaim(slot) || !DateOnly.TryParse(slot.Date, out var slotDate))
             {
                 continue;
             }
