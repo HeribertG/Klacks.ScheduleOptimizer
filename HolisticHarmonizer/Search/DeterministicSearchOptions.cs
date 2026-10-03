@@ -12,8 +12,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// <param name="TabuTenure">Iterations a just-applied swap stays forbidden (prevents undoing sideways moves).</param>
 /// <param name="Seed">Seed for tie-breaking between equally good moves and for batch ids.</param>
 /// <param name="WallClockBudget">Safety-net time budget for the whole search.</param>
-/// <param name="MaxEvaluations">Deterministic upper bound of batch evaluations per pass; sized to bind
-/// before the wall-clock budget on slow machines.</param>
+/// <param name="MaxEvaluations">Deterministic upper bound of batch evaluations per pass.</param>
 /// <param name="Restarts">Independent passes from the same start plan with different tie-breaking (pass 0 = first
 /// best in candidate order, pass k = Random(Seed + k)); the best pass wins. MaxEvaluations applies per pass.</param>
 /// <param name="IncludeAllSameDaySwaps">Adds every hard-valid same-day swap to the candidate pool neighbourhood
@@ -23,6 +22,10 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// On by default: in the stage-3 benchmark each neighbourhood alone
 /// lost on some scenarios (pool-only 0.4731 vs 0.6205 on the 16x37 live size, the full one 0.7238 vs 0.7491 on a
 /// 5x7 week).</param>
+/// <param name="MaxTotalEvaluations">Deterministic upper bound of batch evaluations over all passes; later passes
+/// get what is left. Sized so that it, not the wall clock, ends the search: the benchmark measured about 40 000
+/// evaluations per second (Release, developer machine), so 600 000 take about 15 s there and the wall-clock
+/// budget only binds on a machine more than six times slower.</param>
 public sealed record DeterministicSearchOptions(
     int MaxIterations,
     int MaxNoImprovementIterations,
@@ -33,15 +36,17 @@ public sealed record DeterministicSearchOptions(
     long MaxEvaluations,
     int Restarts = DeterministicSearchOptions.DefaultRestarts,
     bool IncludeAllSameDaySwaps = false,
-    bool AlternateNeighbourhoods = DeterministicSearchOptions.DefaultAlternateNeighbourhoods)
+    bool AlternateNeighbourhoods = DeterministicSearchOptions.DefaultAlternateNeighbourhoods,
+    long MaxTotalEvaluations = DeterministicSearchOptions.DefaultMaxTotalEvaluations)
 {
     public const int DefaultMaxIterations = 200;
     public const int DefaultMaxNoImprovementIterations = 5;
     public const int DefaultPairPoolCap = 100;
     public const int DefaultTabuTenure = 7;
     public const int DefaultSeed = 42;
-    public const int DefaultWallClockBudgetSeconds = 75;
+    public const int DefaultWallClockBudgetSeconds = 90;
     public const long DefaultMaxEvaluations = 150_000;
+    public const long DefaultMaxTotalEvaluations = 600_000;
     public const int DefaultRestarts = 8;
     public const bool DefaultAlternateNeighbourhoods = true;
 

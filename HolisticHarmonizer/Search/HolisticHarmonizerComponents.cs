@@ -12,7 +12,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 
 /// <summary>
 /// Composition root of the stage-3 acceptance stack built from one <see cref="BitmapInput"/>: hard validator,
-/// five-agent committee, score-greedy batch evaluator and the candidate pool over the three intent generators.
+/// five-agent committee, target-hours guard, score-greedy batch evaluator and the candidate pool over the
+/// three intent generators.
 /// The deterministic engine, the LLM engine and the harmonizer eval runner all build through here, so every
 /// mode judges moves identically. Callers must score with <see cref="Fitness"/> (the evaluator the acceptance
 /// stack uses), never with the evaluator they passed in, so a later wrapper around it reaches every caller.
@@ -58,6 +59,7 @@ public sealed record HolisticHarmonizerComponents(
                 new RedistributeLoadCandidateGenerator(),
             },
             topPerIntent);
-        return new HolisticHarmonizerComponents(validator, new BatchEvaluator(validator, fitness, committee), pool, fitness);
+        var evaluator = new BatchEvaluator(validator, fitness, committee, new TargetHoursDeviationGuard());
+        return new HolisticHarmonizerComponents(validator, evaluator, pool, fitness);
     }
 }

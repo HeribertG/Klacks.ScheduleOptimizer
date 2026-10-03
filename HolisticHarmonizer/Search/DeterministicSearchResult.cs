@@ -25,4 +25,7 @@ public sealed record DeterministicSearchResult(
     public int RestartsRun { get; init; } = 1;
 
     public int BestRestart { get; init; }
+
+    /// <summary>True when the evaluation budget over all passes was used up (passes skipped or cut short).</summary>
+    public bool TotalEvaluationBudgetHit { get; init; }
 }

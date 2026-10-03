@@ -21,4 +21,7 @@ public enum PlanMutationRejectionReason : byte
 
     /// <summary>The swap was hard-valid but vetoed by a majority of constraint-agents.</summary>
     CommitteeVeto = 4,
+
+    /// <summary>The batch would move the touched rows further away from their target hours (stage 3 must not).</summary>
+    TargetHoursWorsened = 5,
 }

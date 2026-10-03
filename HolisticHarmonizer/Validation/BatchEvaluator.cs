@@ -21,11 +21,15 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// hard-validator and before applying the swap. When null, no soft veto layer is active and the
 /// evaluator behaves as before. When provided, a majority veto blocks the swap with reason
 /// <see cref="PlanMutationRejectionReason.CommitteeVeto"/>.</param>
+/// <param name="targetHoursGuard">Optional guard checked on the applied prefix before the score: when the
+/// touched rows would move away from their target hours the prefix is reverted and the batch is
+/// <see cref="BatchAcceptance.Rejected"/> with reason <see cref="PlanMutationRejectionReason.TargetHoursWorsened"/>.</param>
 public sealed class BatchEvaluator
 {
     private readonly PlanMutationValidator _mutationValidator;
     private readonly IBitmapFitnessEvaluator _fitnessEvaluator;
     private readonly ConstraintAgentCommittee? _committee;
+    private readonly TargetHoursDeviationGuard? _targetHoursGuard;
 
     public BatchEvaluator(PlanMutationValidator mutationValidator, IBitmapFitnessEvaluator fitnessEvaluator)
         : this(mutationValidator, fitnessEvaluator, committee: null)
@@ -35,11 +39,13 @@ public sealed class BatchEvaluator
     public BatchEvaluator(
         PlanMutationValidator mutationValidator,
         IBitmapFitnessEvaluator fitnessEvaluator,
-        ConstraintAgentCommittee? committee)
+        ConstraintAgentCommittee? committee,
+        TargetHoursDeviationGuard? targetHoursGuard = null)
     {
         _mutationValidator = mutationValidator;
         _fitnessEvaluator = fitnessEvaluator;
         _committee = committee;
+        _targetHoursGuard = targetHoursGuard;
     }
 
     public BatchEvaluation Evaluate(HarmonyBitmap workingBitmap, MutationBatch batch)
@@ -48,6 +54,7 @@ public sealed class BatchEvaluator
         ArgumentNullException.ThrowIfNull(batch);
 
         var scoreBefore = _fitnessEvaluator.Evaluate(workingBitmap).Fitness;
+        var deviationBefore = _targetHoursGuard?.Capture(workingBitmap, batch.Steps);
 
         var appliedSteps = new List<PlanCellSwap>(batch.Steps.Count);
         var rejections = new List<PlanMutationRejection>();
@@ -88,6 +95,22 @@ public sealed class BatchEvaluator
                 AppliedSteps: [],
                 Rejections: rejections,
                 StoppedAtStep: stoppedAtStep,
+                ScoreBefore: scoreBefore,
+                ScoreAfter: scoreBefore);
+        }
+
+        if (_targetHoursGuard is not null
+            && _targetHoursGuard.Diagnose(workingBitmap, deviationBefore!) is { } worsened)
+        {
+            RevertPrefix(workingBitmap, appliedSteps);
+            rejections.Add(new PlanMutationRejection(appliedSteps[^1], PlanMutationRejectionReason.TargetHoursWorsened, worsened));
+            return new BatchEvaluation(
+                batch.BatchId,
+                batch.Intent,
+                BatchAcceptance.Rejected,
+                AppliedSteps: [],
+                Rejections: rejections,
+                StoppedAtStep: stoppedAtStep ?? appliedSteps.Count - 1,
                 ScoreBefore: scoreBefore,
                 ScoreAfter: scoreBefore);
         }

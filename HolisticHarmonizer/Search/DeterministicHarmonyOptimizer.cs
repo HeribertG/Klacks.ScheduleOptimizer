@@ -27,8 +27,10 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// same-day swap to the pool neighbourhood and passes 0 and 1 both take the first best move, so the result is
 /// never worse than the first in-order pass of either neighbourhood (each wins on different plan shapes in the
 /// benchmark). Randomised passes of a single-neighbourhood run use other seeds and can still end higher.
-/// Same input and seed give the same output unless the wall-clock budget hits. Trial evaluations run on the
-/// working bitmap and are reverted (a swap is its own inverse).
+/// Evaluations are capped per pass (<see cref="DeterministicSearchOptions.MaxEvaluations"/>) and over all passes
+/// (<see cref="DeterministicSearchOptions.MaxTotalEvaluations"/>); both caps are deterministic and sized to bind
+/// before the wall-clock safety budget. Same input and seed give the same output unless the wall-clock budget
+/// hits. Trial evaluations run on the working bitmap and are reverted (a swap is its own inverse).
 /// </summary>
 /// <param name="evaluator">Acceptance stack shared with the LLM path.</param>
 /// <param name="pool">Untrimmed candidate pool (topPerIntent = int.MaxValue in production).</param>
@@ -85,6 +87,7 @@ public sealed class DeterministicHarmonyOptimizer
         ArgumentNullException.ThrowIfNull(fitness);
         ArgumentNullException.ThrowIfNull(options);
         if (options.MaxIterations < 0 || options.MaxNoImprovementIterations < 1 || options.PairPoolCap < 0 || options.MaxEvaluations < 0
+            || options.MaxTotalEvaluations < 0
             || options.Restarts < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "Search limits must not be negative; the no-improvement limit and the restart count must be at least 1.");
@@ -119,6 +122,7 @@ public sealed class DeterministicHarmonyOptimizer
         var maxCandidates = 0;
         var restartsRun = 0;
         var wallClockHit = false;
+        var totalBudgetHit = false;
 
         Report(progress, 0, fitnessBefore, 0, startTimestamp);
 
@@ -131,8 +135,15 @@ public sealed class DeterministicHarmonyOptimizer
                 break;
             }
 
+            var remaining = _options.MaxTotalEvaluations - evaluations;
+            if (restart > 0 && remaining <= 0)
+            {
+                totalBudgetHit = true;
+                break;
+            }
+
             var candidate = BitmapCloner.Clone(start);
-            var pass = RunPass(candidate, restart, startTimestamp, cancellationToken);
+            var pass = RunPass(candidate, restart, Math.Min(_options.MaxEvaluations, Math.Max(0, remaining)), startTimestamp, cancellationToken);
             restartsRun++;
             evaluations += pass.Evaluations;
             maxCandidates = Math.Max(maxCandidates, pass.MaxCandidates);
@@ -160,13 +171,14 @@ public sealed class DeterministicHarmonyOptimizer
         {
             RestartsRun = restartsRun,
             BestRestart = best.Restart,
+            TotalEvaluationBudgetHit = totalBudgetHit || evaluations >= _options.MaxTotalEvaluations,
         };
     }
 
-    private PassResult RunPass(HarmonyBitmap working, int restart, long startTimestamp, CancellationToken cancellationToken)
+    private PassResult RunPass(HarmonyBitmap working, int restart, long evaluationBudget, long startTimestamp, CancellationToken cancellationToken)
     {
         var includeAllSameDay = UsesAllSameDaySwaps(restart);
-        var run = new RunState(startTimestamp, _options.Seed, restart, FirstBestInOrder(restart));
+        var run = new RunState(startTimestamp, _options.Seed, restart, FirstBestInOrder(restart), evaluationBudget);
         var tabu = new TabuList(_options.TabuTenure);
         var applied = new List<BatchEvaluation>();
         var current = _fitness.Evaluate(working).Fitness;
@@ -200,6 +212,7 @@ public sealed class DeterministicHarmonyOptimizer
             run.Evaluations++;
             if (evaluation.Result != BatchAcceptance.Accepted)
             {
+                RevertSteps(working, evaluation.AppliedSteps);
                 stopReason = DeterministicSearchStopReason.LocalOptimum;
                 break;
             }
@@ -253,6 +266,18 @@ public sealed class DeterministicHarmonyOptimizer
     /// Equal-score moves only pay off when a later move improves; those applied after the last strict
     /// improvement changed the plan for no measured gain and are rolled back (a swap is its own inverse).
     /// </summary>
+    /// <summary>
+    /// The final evaluation re-runs the chosen batch; anything but a full acceptance (e.g. a kept prefix after a
+    /// later step was vetoed) must not stay in the plan, because only accepted batches are recorded and rolled back.
+    /// </summary>
+    private static void RevertSteps(HarmonyBitmap working, IReadOnlyList<PlanCellSwap> steps)
+    {
+        for (var i = steps.Count - 1; i >= 0; i--)
+        {
+            PlanMutationValidator.Apply(working, steps[i]);
+        }
+    }
+
     private static void DropTrailingSidewaysMoves(HarmonyBitmap working, List<BatchEvaluation> applied, int keptCount)
     {
         for (var b = applied.Count - 1; b >= keptCount; b--)
@@ -284,8 +309,6 @@ public sealed class DeterministicHarmonyOptimizer
                 return (best.Pick(run.TieBreaker), stop);
             }
 
-            // Singles rejected on their own stay in the pair base: as the second step they can become valid
-            // after the first one (an "enabling" pair), which is exactly what pairs add over singles.
             var batch = BuildBatch(candidates[i]);
             var evaluation = TrialEvaluate(working, batch, run);
             singles.Add((candidates[i], i, evaluation.ScoreAfter));
@@ -329,7 +352,7 @@ public sealed class DeterministicHarmonyOptimizer
 
     private DeterministicSearchStopReason? Interruption(RunState run)
     {
-        if (run.Evaluations >= _options.MaxEvaluations)
+        if (run.Evaluations >= run.EvaluationBudget)
         {
             return DeterministicSearchStopReason.EvaluationLimit;
         }
@@ -425,14 +448,18 @@ public sealed class DeterministicHarmonyOptimizer
     {
         private readonly Random _ids;
 
-        public RunState(long startTimestamp, int seed, int restart, bool firstBestInOrder)
+        public RunState(long startTimestamp, int seed, int restart, bool firstBestInOrder, long evaluationBudget)
         {
             StartTimestamp = startTimestamp;
+            EvaluationBudget = evaluationBudget;
             TieBreaker = firstBestInOrder ? null : new Random(seed + restart);
             _ids = new Random(seed + restart);
         }
 
         public long StartTimestamp { get; }
+
+        /// <summary>Evaluations this pass may spend: the per-pass cap or what is left of the total budget.</summary>
+        public long EvaluationBudget { get; }
 
         /// <summary>Null takes the first best move in candidate order.</summary>
         public Random? TieBreaker { get; }
