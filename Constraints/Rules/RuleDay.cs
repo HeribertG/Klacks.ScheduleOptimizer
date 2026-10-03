@@ -4,7 +4,9 @@
 /// Aggregate of everything the planning rules need about one agent-day: classification flags, number of
 /// worked segments, number of night segments and the longest segment durations (the four longest are kept,
 /// which makes ShiftExceedingHours exact unless more than four segments of one day exceed the threshold).
-/// A free day and a break day are both the default value - a break counts as free.
+/// A free day and a break day are both the default value - a break counts as free. The Night flag (sequence and
+/// fairness rules) needs more than the agent's NightRuleMinOverlapMinutes of overlap, NightSegmentCount
+/// (PeriodCount) counts every segment with any overlap.
 /// </summary>
 
 namespace Klacks.ScheduleOptimizer.Constraints.Rules;
@@ -71,8 +73,12 @@ public struct RuleDay
 
         if (RuleSegmentClassifier.IsNight(segment, agent.NightWindow))
         {
-            flags |= RuleDayFlags.Night;
             NightSegmentCount++;
+        }
+
+        if (RuleSegmentClassifier.IsNight(segment, agent.NightWindow, agent.NightRuleMinOverlapMinutes))
+        {
+            flags |= RuleDayFlags.Night;
         }
 
         Flags = flags;

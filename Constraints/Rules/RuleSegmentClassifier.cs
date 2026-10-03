@@ -26,14 +26,20 @@ public static class RuleSegmentClassifier
         return end > start ? end - start : RuleTimeConstants.MinutesPerDay - start + end;
     }
 
-    public static bool IsNight(in RuleSegment segment, CoreNightWindow? window)
+    public static bool IsNight(in RuleSegment segment, CoreNightWindow? window) => IsNight(segment, window, 0);
+
+    /// <summary>
+    /// Night when the overlap with the window exceeds <paramref name="minOverlapMinutes"/> (0 = any overlap); the
+    /// ShiftTypeIndex fallback without window or clock times is the same for every threshold.
+    /// </summary>
+    public static bool IsNight(in RuleSegment segment, CoreNightWindow? window, int minOverlapMinutes)
     {
         if (window is null || !segment.HasClockTimes)
         {
             return segment.ShiftTypeIndex == RuleTimeConstants.NightShiftTypeIndex;
         }
 
-        return NightOverlapMinutes(segment.Start!.Value, segment.End!.Value, window.Value.Start, window.Value.End) > 0;
+        return NightOverlapMinutes(segment.Start!.Value, segment.End!.Value, window.Value.Start, window.Value.End) > Math.Max(0, minOverlapMinutes);
     }
 
     public static int NightOverlapMinutes(TimeOnly segmentStart, TimeOnly segmentEnd, TimeOnly windowStart, TimeOnly windowEnd)
