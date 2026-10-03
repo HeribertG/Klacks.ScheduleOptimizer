@@ -5,7 +5,9 @@
 /// boundary locked and existing works, the bitmap engines their boundary assignments; boundary breaks are
 /// left out because a break counts as free. Both engine boundaries only reach the ContextDays window, so a
 /// month or year PeriodCount needs the carry-in segments of the rest of the counted period, passed in by
-/// the caller (the API loader) as <paramref name="carryIn"/>.
+/// the caller (the API loader) as <paramref name="carryIn"/>. The night minimum overlap of the sequence and fairness
+/// rules is a required argument: the API reads it from NIGHT_RULE_MIN_OVERLAP_MINUTES (PlanningRuleSet agents carry
+/// it), and an engine must pass the same value so engine and validator classify the same segments as night.
 /// </summary>
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
@@ -15,12 +17,13 @@ namespace Klacks.ScheduleOptimizer.Constraints.Rules;
 
 public static class RuleEvaluationContextFactory
 {
-    public static RuleEvaluationContext FromWizardContext(CoreWizardContext context, IReadOnlyList<RuleSegment>? carryIn = null)
+    public static RuleEvaluationContext FromWizardContext(
+        CoreWizardContext context, int nightRuleMinOverlapMinutes, IReadOnlyList<RuleSegment>? carryIn = null)
     {
         var agents = new List<RuleAgent>(context.Agents.Count);
         foreach (var agent in context.Agents)
         {
-            agents.Add(new RuleAgent(agent.Id, agent.NightWindow, WorkloadPercentOf(agent)));
+            agents.Add(new RuleAgent(agent.Id, agent.NightWindow, WorkloadPercentOf(agent), nightRuleMinOverlapMinutes));
         }
 
         var boundary = new List<RuleSegment>(
@@ -39,12 +42,14 @@ public static class RuleEvaluationContextFactory
         return new RuleEvaluationContext(context.PeriodFrom, context.PeriodUntil, agents, boundary);
     }
 
-    public static RuleEvaluationContext FromBitmap(BitmapInput input, IReadOnlyList<RuleSegment>? carryIn = null)
+    public static RuleEvaluationContext FromBitmap(
+        BitmapInput input, int nightRuleMinOverlapMinutes, IReadOnlyList<RuleSegment>? carryIn = null)
     {
         var agents = new List<RuleAgent>(input.Agents.Count);
         foreach (var agent in input.Agents)
         {
-            agents.Add(new RuleAgent(agent.Id, agent.NightWindow, agent.WorkloadPercent ?? RuleTimeConstants.FullWorkloadPercent));
+            agents.Add(new RuleAgent(
+                agent.Id, agent.NightWindow, agent.WorkloadPercent ?? RuleTimeConstants.FullWorkloadPercent, nightRuleMinOverlapMinutes));
         }
 
         var boundaryAssignments = input.BoundaryAssignments ?? [];
