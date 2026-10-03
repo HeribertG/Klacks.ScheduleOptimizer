@@ -3,7 +3,8 @@
 /// <summary>
 /// Check for RestAfterKindRule: the block of the kind ends on a day whose next day is not of the kind;
 /// every worked day among the FreeDays days after it is excess. Reported at the block end. A break day is
-/// a free day.
+/// a free day. Only rest days inside the period count: a block that ends before the period is a finding only
+/// when a worked rest day falls into the period itself.
 /// </summary>
 /// <param name="rule">The rest rule</param>
 /// <param name="context">Evaluation context</param>
@@ -76,7 +77,7 @@ internal sealed class RestAfterKindCheck : RuleCheck
         }
 
         var worked = 0;
-        for (var offset = 1; offset <= _freeDays; offset++)
+        for (var offset = Math.Max(1, -blockEnd); offset <= _freeDays; offset++)
         {
             if (timeline[blockEnd + offset].IsWork)
             {
