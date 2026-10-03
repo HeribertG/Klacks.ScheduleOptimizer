@@ -12,7 +12,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// stops at the first hard-constraint violation OR committee veto (longest valid prefix), then
 /// enforces Score-Greedy on the prefix end-state. If the prefix score does not regress, the
 /// prefix is kept; otherwise the prefix is reverted and the whole batch is reported as
-/// <see cref="BatchAcceptance.WouldDegrade"/>.
+/// <see cref="BatchAcceptance.WouldDegrade"/> carrying the real degraded score and the reverted steps.
 /// </summary>
 /// <param name="mutationValidator">Hard-constraint layer used per step (locks, bounds, caps,
 /// pause, availability).</param>
@@ -118,7 +118,10 @@ public sealed class BatchEvaluator
             Rejections: rejections,
             StoppedAtStep: stoppedAtStep,
             ScoreBefore: scoreBefore,
-            ScoreAfter: scoreBefore);
+            ScoreAfter: scoreAfter)
+        {
+            RevertedSteps = appliedSteps,
+        };
     }
 
     private static void RevertPrefix(HarmonyBitmap bitmap, IReadOnlyList<PlanCellSwap> appliedSteps)

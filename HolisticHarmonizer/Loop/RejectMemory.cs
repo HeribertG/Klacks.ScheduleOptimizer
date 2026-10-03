@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using System.Globalization;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
@@ -69,6 +70,27 @@ public sealed class RejectMemory
         return ordered;
     }
 
+    /// <summary>
+    /// Same-day subset of <see cref="ForbiddenSwapKeys"/> as a lookup set. The candidate pool only offers
+    /// same-day swaps, and <see cref="ForbiddenSwapKey"/> drops DayB, so a cross-day reject must never ban
+    /// an unrelated same-day candidate on its DayA.
+    /// </summary>
+    public IReadOnlySet<ForbiddenSwapKey> SameDayForbiddenSwapKeys()
+    {
+        var result = new HashSet<ForbiddenSwapKey>();
+        foreach (var entry in _entries)
+        {
+            foreach (var swap in entry.RejectedSwaps)
+            {
+                if (swap.DayA == swap.DayB)
+                {
+                    result.Add(ForbiddenSwapKey.From(swap));
+                }
+            }
+        }
+        return result;
+    }
+
     private static IReadOnlyList<PlanCellSwap> ExtractRejectedSwaps(BatchEvaluation evaluation) =>
         evaluation.Result switch
         {
@@ -76,7 +98,7 @@ public sealed class RejectMemory
                 ? evaluation.Rejections.Select(r => r.Swap).ToList()
                 : [],
             BatchAcceptance.PartiallyAccepted => evaluation.Rejections.Select(r => r.Swap).ToList(),
-            BatchAcceptance.WouldDegrade => evaluation.AppliedSteps,
+            BatchAcceptance.WouldDegrade => evaluation.RevertedSteps,
             _ => [],
         };
 
@@ -85,7 +107,13 @@ public sealed class RejectMemory
         switch (evaluation.Result)
         {
             case BatchAcceptance.WouldDegrade:
-                return $"all steps passed hard constraints but final score {evaluation.ScoreAfter:F3} <= start {evaluation.ScoreBefore:F3}";
+                return string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0} step(s) passed hard constraints but the final score {1:F4} is below the start {2:F4} (delta {3:+0.0000;-0.0000}); all reverted",
+                    evaluation.RevertedSteps.Count,
+                    evaluation.ScoreAfter,
+                    evaluation.ScoreBefore,
+                    evaluation.ScoreAfter - evaluation.ScoreBefore);
             case BatchAcceptance.PartiallyAccepted:
                 return $"prefix of {evaluation.AppliedSteps.Count} step(s) kept; rest broke at step {evaluation.StoppedAtStep}";
             case BatchAcceptance.Rejected when evaluation.Rejections.Count > 0:

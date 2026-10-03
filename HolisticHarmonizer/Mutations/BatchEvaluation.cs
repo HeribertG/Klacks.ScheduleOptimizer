@@ -17,8 +17,11 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 /// <param name="StoppedAtStep">Zero-based index of the first failing step, or null if all steps
 /// passed hard constraints (the batch may still have been reverted via Score-Greedy).</param>
 /// <param name="ScoreBefore">Fitness of the working bitmap before applying the batch.</param>
-/// <param name="ScoreAfter">Fitness of the working bitmap after the batch was committed
-/// (or the original score if the batch was reverted).</param>
+/// <param name="ScoreAfter">Fitness after the batch: the committed end-state when Accepted or
+/// PartiallyAccepted, the real (lower) end-state score of the reverted prefix when WouldDegrade, and the
+/// unchanged start score when Rejected (nothing was applied).</param>
+/// <remarks>RevertedSteps: steps that passed hard validation and the committee, were applied and then
+/// rolled back by Score-Greedy. Non-empty only for WouldDegrade; never part of the committed plan.</remarks>
 public sealed record BatchEvaluation(
     Guid BatchId,
     string Intent,
@@ -27,4 +30,7 @@ public sealed record BatchEvaluation(
     IReadOnlyList<PlanMutationRejection> Rejections,
     int? StoppedAtStep,
     double ScoreBefore,
-    double ScoreAfter);
+    double ScoreAfter)
+{
+    public IReadOnlyList<PlanCellSwap> RevertedSteps { get; init; } = [];
+}

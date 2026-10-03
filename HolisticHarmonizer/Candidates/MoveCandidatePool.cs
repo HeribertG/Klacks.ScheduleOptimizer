@@ -2,6 +2,7 @@
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 
@@ -47,9 +48,17 @@ public sealed class MoveCandidatePool
     /// <summary>
     /// Returns the pre-validated, ranked, capped candidate list for the supplied intent. The
     /// list may be empty when no structural opportunity exists or when every raw suggestion
-    /// fails hard validation.
+    /// fails hard validation. Same-day candidates whose canonical key is in <paramref name="excluded"/>
+    /// are dropped before ranking, so swaps the reject memory already saw fail (hard violation,
+    /// committee veto or score regression) are not offered again.
     /// </summary>
-    public IReadOnlyList<MoveCandidate> Generate(HarmonyBitmap bitmap, string intent)
+    /// <param name="bitmap">Current working bitmap.</param>
+    /// <param name="intent">Focused intent whose generator is used.</param>
+    /// <param name="excluded">Same-day forbidden swap keys; null or empty disables the filter.</param>
+    public IReadOnlyList<MoveCandidate> Generate(
+        HarmonyBitmap bitmap,
+        string intent,
+        IReadOnlySet<ForbiddenSwapKey>? excluded = null)
     {
         ArgumentNullException.ThrowIfNull(bitmap);
         ArgumentException.ThrowIfNullOrWhiteSpace(intent);
@@ -65,7 +74,7 @@ public sealed class MoveCandidatePool
         foreach (var raw in generator.Generate(bitmap))
         {
             var key = CandidateKey.From(raw);
-            if (!seen.Add(key))
+            if (!seen.Add(key) || IsExcluded(raw, excluded))
             {
                 continue;
             }
@@ -83,6 +92,15 @@ public sealed class MoveCandidatePool
             validated.RemoveRange(_topPerIntent, validated.Count - _topPerIntent);
         }
         return validated;
+    }
+
+    private static bool IsExcluded(MoveCandidate candidate, IReadOnlySet<ForbiddenSwapKey>? excluded)
+    {
+        if (excluded is null || excluded.Count == 0 || candidate.DayA != candidate.DayB)
+        {
+            return false;
+        }
+        return excluded.Contains(ForbiddenSwapKey.From(ToSwap(candidate)));
     }
 
     private static PlanCellSwap ToSwap(MoveCandidate candidate)
