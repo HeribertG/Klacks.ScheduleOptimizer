@@ -13,6 +13,7 @@
 /// <param name="Date">Anchor date of the violation</param>
 /// <param name="Observed">Observed value</param>
 /// <param name="Limit">Configured limit</param>
+/// <param name="Excess">Amount by which the finding exceeds the limit (the unit the soft penalty is weighted with)</param>
 
 namespace Klacks.ScheduleOptimizer.Constraints.Rules;
 
@@ -23,4 +24,5 @@ public sealed record RuleFinding(
     string? AgentId,
     DateOnly Date,
     decimal Observed,
-    decimal Limit);
+    decimal Limit,
+    decimal Excess = 0m);

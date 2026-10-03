@@ -16,7 +16,7 @@ internal sealed class RuleFindingCollector
     public void Add(PlanRule rule, RuleSeverity severity, string? agentId, DateOnly date, decimal observed, decimal limit, decimal excess)
     {
         _findings ??= [];
-        _findings.Add(new RuleFinding(rule.RuleId, rule.Kind, severity, agentId, date, observed, limit));
+        _findings.Add(new RuleFinding(rule.RuleId, rule.Kind, severity, agentId, date, observed, limit, excess));
         if (severity == RuleSeverity.Hard)
         {
             _hardCount++;
