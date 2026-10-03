@@ -19,7 +19,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// <param name="IncludeAllSameDaySwaps">Adds every hard-valid same-day swap to the candidate pool neighbourhood
 /// in every pass (much larger and slower; off by default).</param>
 /// <param name="AlternateNeighbourhoods">Even passes search the pool neighbourhood, odd passes the pool plus every
-/// hard-valid same-day swap; the best pass wins. On by default: in the stage-3 benchmark each neighbourhood alone
+/// hard-valid same-day swap; the best pass wins (never below the first in-order pass of either neighbourhood).
+/// On by default: in the stage-3 benchmark each neighbourhood alone
 /// lost on some scenarios (pool-only 0.4731 vs 0.6205 on the 16x37 live size, the full one 0.7238 vs 0.7491 on a
 /// 5x7 week).</param>
 public sealed record DeterministicSearchOptions(

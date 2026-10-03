@@ -25,7 +25,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// move in candidate order, pass k takes a tie by <c>Random(Seed + k)</c>; the best pass wins (earliest on a tie).
 /// With <see cref="DeterministicSearchOptions.AlternateNeighbourhoods"/> the odd passes add every hard-valid
 /// same-day swap to the pool neighbourhood and passes 0 and 1 both take the first best move, so the result is
-/// never worse than either neighbourhood alone (each wins on different plan shapes in the benchmark).
+/// never worse than the first in-order pass of either neighbourhood (each wins on different plan shapes in the
+/// benchmark). Randomised passes of a single-neighbourhood run use other seeds and can still end higher.
 /// Same input and seed give the same output unless the wall-clock budget hits. Trial evaluations run on the
 /// working bitmap and are reverted (a swap is its own inverse).
 /// </summary>
