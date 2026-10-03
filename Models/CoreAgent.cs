@@ -88,4 +88,10 @@ public record CoreAgent(
 
     /// <summary>How WE3Rate is to be interpreted.</summary>
     public CoreSurchargeRateMode WE3RateMode { get; init; } = CoreSurchargeRateMode.Multiplier;
+
+    /// <summary>
+    /// Effective contractual night window, used by the planning-rule evaluator to classify night work.
+    /// Null means no window is known and night falls back to ShiftTypeIndex 2; no existing engine reads it.
+    /// </summary>
+    public CoreNightWindow? NightWindow { get; init; } = null;
 }
