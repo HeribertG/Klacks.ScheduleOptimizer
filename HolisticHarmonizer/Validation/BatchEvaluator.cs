@@ -24,17 +24,17 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 public sealed class BatchEvaluator
 {
     private readonly PlanMutationValidator _mutationValidator;
-    private readonly HarmonyFitnessEvaluator _fitnessEvaluator;
+    private readonly IBitmapFitnessEvaluator _fitnessEvaluator;
     private readonly ConstraintAgentCommittee? _committee;
 
-    public BatchEvaluator(PlanMutationValidator mutationValidator, HarmonyFitnessEvaluator fitnessEvaluator)
+    public BatchEvaluator(PlanMutationValidator mutationValidator, IBitmapFitnessEvaluator fitnessEvaluator)
         : this(mutationValidator, fitnessEvaluator, committee: null)
     {
     }
 
     public BatchEvaluator(
         PlanMutationValidator mutationValidator,
-        HarmonyFitnessEvaluator fitnessEvaluator,
+        IBitmapFitnessEvaluator fitnessEvaluator,
         ConstraintAgentCommittee? committee)
     {
         _mutationValidator = mutationValidator;

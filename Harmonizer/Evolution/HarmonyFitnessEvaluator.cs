@@ -27,21 +27,31 @@ public sealed class HarmonyFitnessEvaluator : IBitmapFitnessEvaluator
         }
 
         var rowScores = new double[bitmap.RowCount];
-        var weightedSum = 0.0;
-        var weightTotal = 0.0;
-        var rowCount = bitmap.RowCount;
-
-        for (var r = 0; r < rowCount; r++)
+        for (var r = 0; r < bitmap.RowCount; r++)
         {
-            var rowScore = _scorer.Score(bitmap, r).Score;
-            rowScores[r] = rowScore;
-            var weight = (double)(rowCount - r);
-            weightedSum += weight * rowScore;
-            weightTotal += weight;
+            rowScores[r] = _scorer.Score(bitmap, r).Score;
         }
 
-        var fitness = weightTotal > 0 ? weightedSum / weightTotal : 0.0;
+        var fitness = WeightedFitness(rowScores);
         return new FitnessResult(fitness, rowScores);
+    }
+
+    /// <summary>
+    /// Combines per-row scores with linearly decreasing weights (top row weighs RowCount, last row 1).
+    /// Shared with <see cref="MemoizedHarmonyFitnessEvaluator"/> so both produce bit-identical fitness values.
+    /// </summary>
+    public static double WeightedFitness(IReadOnlyList<double> rowScores)
+    {
+        var weightedSum = 0.0;
+        var weightTotal = 0.0;
+        var rowCount = rowScores.Count;
+        for (var r = 0; r < rowCount; r++)
+        {
+            var weight = (double)(rowCount - r);
+            weightedSum += weight * rowScores[r];
+            weightTotal += weight;
+        }
+        return weightTotal > 0 ? weightedSum / weightTotal : 0.0;
     }
 }
 
