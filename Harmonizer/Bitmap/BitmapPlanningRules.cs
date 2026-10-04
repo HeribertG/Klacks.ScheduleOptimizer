@@ -15,11 +15,14 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// API validators classify night with (required, there is no engine default)</param>
 /// <param name="IgnoredWorkIds">Work ids the rule evaluation skips (container sub-works, which the API rule readers
 /// never count); null = none</param>
+/// <param name="InvalidHardRuleIds">Approved hard constraints the loader skipped because their stored parameters are
+/// invalid; the run plans without them and reports them as a warning instead of failing; null = none</param>
 public sealed record BitmapPlanningRules(
     IReadOnlyList<PlanRule> Rules,
     IReadOnlyList<RuleSegment> CarryIn,
     int NightRuleMinOverlapMinutes,
-    IReadOnlySet<Guid>? IgnoredWorkIds = null)
+    IReadOnlySet<Guid>? IgnoredWorkIds = null,
+    IReadOnlyList<Guid>? InvalidHardRuleIds = null)
 {
     public bool IsEmpty => Rules.Count == 0;
 }

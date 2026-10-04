@@ -32,4 +32,11 @@ public sealed record HolisticHarmonizerRunResult(
     string LlmModelId,
     string? LlmParsingError,
     string? LlmRawResponsePreview,
-    bool AbortedOnUnusableResponses = false);
+    bool AbortedOnUnusableResponses = false)
+{
+    /// <summary>
+    /// Approved hard planning constraints that were skipped because their stored parameters are invalid; the
+    /// caller surfaces them as a warning (the run itself honoured every valid rule).
+    /// </summary>
+    public IReadOnlyList<Guid> InvalidPlanningRuleIds { get; init; } = [];
+}
