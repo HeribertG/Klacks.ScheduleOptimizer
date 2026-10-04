@@ -33,30 +33,38 @@ internal sealed class ForbiddenTransitionCheck : RuleCheck
     {
         for (var agent = 0; agent < plan.AgentCount; agent++)
         {
-            if (!AppliesTo(agent))
+            if (AppliesTo(agent))
+            {
+                Scan(RuleTimeline.Of(plan, boundary, agent), collector);
+            }
+        }
+    }
+
+    public override decimal AgentExcess(in RuleTimeline timeline) => Scan(timeline, collector: null);
+
+    private decimal Scan(in RuleTimeline timeline, RuleFindingCollector? collector)
+    {
+        var excess = 0m;
+        for (var day = -_withinDays; day < timeline.DayCount; day++)
+        {
+            if (!timeline[day].Has(_from))
             {
                 continue;
             }
 
-            var timeline = RuleTimeline.Of(plan, boundary, agent);
-            for (var day = -_withinDays; day < plan.DayCount; day++)
+            for (var gap = 1; gap <= _withinDays; gap++)
             {
-                if (!timeline[day].Has(_from))
+                var next = day + gap;
+                if (next >= 0 && timeline[next].Has(_to))
                 {
-                    continue;
-                }
-
-                for (var gap = 1; gap <= _withinDays; gap++)
-                {
-                    var next = day + gap;
-                    if (next >= 0 && timeline[next].Has(_to))
-                    {
-                        Report(collector, agent, day, gap, _withinDays, ExcessPerTransition);
-                        break;
-                    }
+                    Report(collector, timeline.AgentIndex, day, gap, _withinDays, ExcessPerTransition);
+                    excess += ExcessPerTransition;
+                    break;
                 }
             }
         }
+
+        return excess;
     }
 
     public override bool WouldViolate(in RuleTimeline timeline, int dayIndex)

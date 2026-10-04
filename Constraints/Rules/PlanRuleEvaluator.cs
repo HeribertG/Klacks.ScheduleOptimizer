@@ -10,12 +10,14 @@
 
 namespace Klacks.ScheduleOptimizer.Constraints.Rules;
 
-public sealed class PlanRuleEvaluator : IPlanRuleEvaluator
+public sealed class PlanRuleEvaluator : IIncrementalPlanRuleEvaluator
 {
     private readonly RuleEvaluationContext _context;
     private readonly RuleBoundaryIndex _boundary;
     private readonly RuleCheck[] _checks;
     private readonly RuleCheck[] _hardChecks;
+    private readonly RuleCheck[] _softAgentChecks;
+    private readonly TeamFairnessCheck[] _teamChecks;
 
     internal PlanRuleEvaluator(IReadOnlyList<PlanRule> rules, RuleEvaluationContext context)
     {
@@ -34,6 +36,67 @@ public sealed class PlanRuleEvaluator : IPlanRuleEvaluator
         }
 
         _hardChecks = Array.FindAll(_checks, check => check.IsHard);
+        _softAgentChecks = Array.FindAll(_checks, check => !check.IsHard && check.IsPerAgent);
+        _teamChecks = _checks.OfType<TeamFairnessCheck>().ToArray();
+        TeamWindowCount = _teamChecks.Sum(check => check.WindowCount);
+    }
+
+    public int HardRuleCount => _hardChecks.Length;
+
+    public bool HasSoftRules => _softAgentChecks.Length > 0 || _teamChecks.Length > 0;
+
+    public int TeamWindowCount { get; }
+
+    public PlanRule HardRuleAt(int hardRuleIndex) => _hardChecks[hardRuleIndex].Rule;
+
+    public void HardExcessOf(RulePlan plan, int agentIndex, Span<decimal> excessByHardRule)
+    {
+        EnsureSameContext(plan);
+        var timeline = RuleTimeline.Of(plan, _boundary, agentIndex);
+        for (var i = 0; i < _hardChecks.Length; i++)
+        {
+            excessByHardRule[i] = _hardChecks[i].AppliesTo(agentIndex) ? _hardChecks[i].AgentExcess(timeline) : 0m;
+        }
+    }
+
+    public double AgentSoftPenalty(RulePlan plan, int agentIndex, Span<decimal> teamWindowValues)
+    {
+        EnsureSameContext(plan);
+        var timeline = RuleTimeline.Of(plan, _boundary, agentIndex);
+        var penalty = 0d;
+        foreach (var check in _softAgentChecks)
+        {
+            if (check.AppliesTo(agentIndex))
+            {
+                penalty += check.Rule.Weight * (double)check.AgentExcess(timeline);
+            }
+        }
+
+        var offset = 0;
+        foreach (var check in _teamChecks)
+        {
+            for (var window = 0; window < check.WindowCount; window++)
+            {
+                teamWindowValues[offset + window] = check.WindowValue(plan, agentIndex, window);
+            }
+
+            offset += check.WindowCount;
+        }
+
+        return penalty;
+    }
+
+    public double TeamSoftPenalty(IReadOnlyList<decimal[]> teamWindowValuesByAgent)
+    {
+        var penalty = 0d;
+        var offset = 0;
+        foreach (var check in _teamChecks)
+        {
+            penalty += check.PenaltyFromValues(teamWindowValuesByAgent, offset);
+            offset += check.WindowCount;
+        }
+
+        return penalty;
     }
 
     public RuleEvaluation Evaluate(RulePlan plan)

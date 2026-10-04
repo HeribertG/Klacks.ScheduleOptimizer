@@ -2,6 +2,7 @@
 
 using System.Globalization;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
+using Klacks.ScheduleOptimizer.Harmonizer.Rules;
 
 namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 
@@ -19,18 +20,27 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// edges (period start / period end) are detected. Cells in the bitmap itself are never affected;
 /// the engine never reads or mutates these entries.
 /// </param>
+/// <param name="ineligibleAssignments">Optional (agent, shift, date) triples the agent lacks a mandatory qualification for</param>
+/// <param name="planningRules">
+/// Optional hard planning-rule guard (BitmapInput.Rules). Checked for BOTH receiving sides of a swap, also when a side
+/// receives a free cell (losing a day can shorten a block and pull a worked day into a rest window). Null = no
+/// planning-rule check, identical to the behaviour before planning rules existed.
+/// </param>
 public sealed class DomainAwareReplaceValidator : IReplaceValidator
 {
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
     private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
     private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _ineligibleAssignments;
     private readonly BitmapWeeklyRestDayGuard _weeklyRestDays;
+    private readonly PlanningRuleMoveGuard? _planningRules;
 
     public DomainAwareReplaceValidator(
         IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? availability,
         IReadOnlyList<BitmapAssignment>? boundaryAssignments = null,
-        IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? ineligibleAssignments = null)
+        IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? ineligibleAssignments = null,
+        PlanningRuleMoveGuard? planningRules = null)
     {
+        _planningRules = planningRules;
         _availability = availability ?? new Dictionary<(string, DateOnly), DayAvailability>();
         _ineligibleAssignments = ineligibleAssignments ?? new HashSet<(string, Guid, DateOnly)>();
         _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
@@ -42,6 +52,20 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
                 _boundaryByKey[(assignment.AgentId, assignment.Date)] = assignment;
             }
         }
+    }
+
+    /// <summary>
+    /// Validator for a run's input; with planning rules that contain a hard rule it also carries the hard
+    /// planning-rule guard, otherwise it is identical to the plain constructor.
+    /// </summary>
+    public static DomainAwareReplaceValidator ForInput(BitmapInput input, BitmapRuleRuntime? planningRules)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        return new DomainAwareReplaceValidator(
+            input.Availability,
+            input.BoundaryAssignments,
+            input.IneligibleAssignments,
+            planningRules is { HasHardRules: true } ? new PlanningRuleMoveGuard(planningRules) : null);
     }
 
     /// <summary>
@@ -140,7 +164,35 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         return null;
     }
 
+    /// <summary>
+    /// Null when replacing the given cells of one row creates or worsens no hard planning-rule finding, otherwise a
+    /// short reason. Public so Wizard 3's PlanMutationValidator applies the same check on its cross-day branch; a
+    /// cross-day swap within ONE row passes both cells at once. Always null without planning rules.
+    /// </summary>
+    public string? DiagnosePlanningRules(HarmonyBitmap bitmap, int row, ReadOnlySpan<(int Day, Cell Cell)> replacements, string roleLabel)
+        => _planningRules?.Diagnose(bitmap, row, replacements, roleLabel);
+
     private string? DiagnoseReceivingSide(
+        HarmonyBitmap bitmap,
+        int receivingRow,
+        BitmapAgent receivingAgent,
+        DateOnly date,
+        Cell incomingCell,
+        string roleLabel)
+    {
+        var domainIssue = DiagnoseDomainReceivingSide(bitmap, receivingRow, receivingAgent, date, incomingCell, roleLabel);
+        if (domainIssue is not null || _planningRules is null)
+        {
+            return domainIssue;
+        }
+
+        var dayIndex = IndexOfDate(bitmap.Days, date);
+        return dayIndex < 0
+            ? null
+            : _planningRules.Diagnose(bitmap, receivingRow, [(dayIndex, incomingCell)], roleLabel);
+    }
+
+    private string? DiagnoseDomainReceivingSide(
         HarmonyBitmap bitmap,
         int receivingRow,
         BitmapAgent receivingAgent,

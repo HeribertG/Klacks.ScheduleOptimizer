@@ -42,21 +42,29 @@ internal sealed class PeriodCountCheck : RuleCheck
     {
         for (var agent = 0; agent < plan.AgentCount; agent++)
         {
-            if (!AppliesTo(agent))
+            if (AppliesTo(agent))
             {
-                continue;
-            }
-
-            var timeline = RuleTimeline.Of(plan, boundary, agent);
-            for (var slot = 0; slot < _slots.Count; slot++)
-            {
-                var count = Count(timeline, agent, slot);
-                if (count >= _threshold)
-                {
-                    Report(collector, agent, _slots.FirstDay(slot), count, _threshold, count - _threshold + 1);
-                }
+                Scan(RuleTimeline.Of(plan, boundary, agent), collector);
             }
         }
+    }
+
+    public override decimal AgentExcess(in RuleTimeline timeline) => Scan(timeline, collector: null);
+
+    private decimal Scan(in RuleTimeline timeline, RuleFindingCollector? collector)
+    {
+        var excess = 0m;
+        for (var slot = 0; slot < _slots.Count; slot++)
+        {
+            var count = Count(timeline, timeline.AgentIndex, slot);
+            if (count >= _threshold)
+            {
+                Report(collector, timeline.AgentIndex, _slots.FirstDay(slot), count, _threshold, count - _threshold + 1);
+                excess += count - _threshold + 1;
+            }
+        }
+
+        return excess;
     }
 
     public override bool WouldViolate(in RuleTimeline timeline, int dayIndex)

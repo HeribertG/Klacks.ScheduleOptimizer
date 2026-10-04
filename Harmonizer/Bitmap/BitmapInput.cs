@@ -26,6 +26,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// calendar day at persist time, so a compliant slot can be relocated into a forbidden window; the same-day
 /// path never changes a cell's day and so does not read this.
 /// </param>
+/// <param name="Rules">
+/// Optional planning rules of the run (hard: move veto in Wizard 2/3, soft: fitness term in Wizard 3). Null or an
+/// empty rule list = no rule hook at all, which keeps every engine byte-identical to a run without planning rules.
+/// </param>
 public sealed record BitmapInput(
     IReadOnlyList<BitmapAgent> Agents,
     DateOnly StartDate,
@@ -35,4 +39,5 @@ public sealed record BitmapInput(
     IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? Availability = null,
     IReadOnlyList<BitmapAssignment>? BoundaryAssignments = null,
     IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? IneligibleAssignments = null,
-    IReadOnlyList<CoreRestrictedTimeWindow>? RestrictedTimeWindows = null);
+    IReadOnlyList<CoreRestrictedTimeWindow>? RestrictedTimeWindows = null,
+    BitmapPlanningRules? Rules = null);

@@ -25,45 +25,54 @@ internal sealed class MaxConsecutiveOfKindCheck : RuleCheck
 
     public override void Evaluate(RulePlan plan, RuleBoundaryIndex boundary, RuleFindingCollector collector)
     {
-        var dayCount = plan.DayCount;
         for (var agent = 0; agent < plan.AgentCount; agent++)
         {
-            if (!AppliesTo(agent))
+            if (AppliesTo(agent))
             {
+                Scan(RuleTimeline.Of(plan, boundary, agent), collector);
+            }
+        }
+    }
+
+    public override decimal AgentExcess(in RuleTimeline timeline) => Scan(timeline, collector: null);
+
+    private decimal Scan(in RuleTimeline timeline, RuleFindingCollector? collector)
+    {
+        var dayCount = timeline.DayCount;
+        var neighborDays = timeline.NeighborDays;
+        var excess = 0m;
+        var day = 0;
+        while (day < dayCount)
+        {
+            if (!timeline[day].Has(_kind))
+            {
+                day++;
                 continue;
             }
 
-            var timeline = RuleTimeline.Of(plan, boundary, agent);
-            var day = 0;
-            while (day < dayCount)
+            var start = day;
+            while (start > -neighborDays && timeline[start - 1].Has(_kind))
             {
-                if (!timeline[day].Has(_kind))
-                {
-                    day++;
-                    continue;
-                }
-
-                var start = day;
-                while (start > -boundary.NeighborDays && timeline[start - 1].Has(_kind))
-                {
-                    start--;
-                }
-
-                var end = day;
-                while (end < dayCount - 1 + boundary.NeighborDays && timeline[end + 1].Has(_kind))
-                {
-                    end++;
-                }
-
-                var run = end - start + 1;
-                if (run > _maxRun)
-                {
-                    Report(collector, agent, start, run, _maxRun, run - _maxRun);
-                }
-
-                day = end + 1;
+                start--;
             }
+
+            var end = day;
+            while (end < dayCount - 1 + neighborDays && timeline[end + 1].Has(_kind))
+            {
+                end++;
+            }
+
+            var run = end - start + 1;
+            if (run > _maxRun)
+            {
+                Report(collector, timeline.AgentIndex, start, run, _maxRun, run - _maxRun);
+                excess += run - _maxRun;
+            }
+
+            day = end + 1;
         }
+
+        return excess;
     }
 
     public override bool WouldViolate(in RuleTimeline timeline, int dayIndex)

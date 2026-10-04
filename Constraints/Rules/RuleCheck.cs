@@ -39,8 +39,25 @@ internal abstract class RuleCheck
 
     public virtual bool WouldViolate(in RuleTimeline timeline, int dayIndex) => false;
 
-    protected void Report(RuleFindingCollector collector, int? agentIndex, int dayIndex, decimal observed, decimal limit, decimal excess)
+    /// <summary>
+    /// True for a check whose findings belong to one agent each; only these can be split into per-agent excess
+    /// sums (team checks compare agents and are decomposed through their window values instead).
+    /// </summary>
+    public virtual bool IsPerAgent => true;
+
+    /// <summary>
+    /// Sum of the Excess of every finding Evaluate reports for the agent of <paramref name="timeline"/> - the unit
+    /// the engine delta compares per (rule, agent), as PlanningRuleFindingDelta does. Scope is the caller's job.
+    /// </summary>
+    public virtual decimal AgentExcess(in RuleTimeline timeline) => 0m;
+
+    protected void Report(RuleFindingCollector? collector, int? agentIndex, int dayIndex, decimal observed, decimal limit, decimal excess)
     {
+        if (collector is null)
+        {
+            return;
+        }
+
         var agentId = agentIndex.HasValue ? Context.Agents[agentIndex.Value].Id : null;
         collector.Add(Rule, Severity, agentId, Context.DateAt(dayIndex), observed, limit, excess);
     }

@@ -15,7 +15,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// rest days of the schedule check are enforced hard on both receiving rows of a cross-day swap. The
 /// remaining per-row constraint checks (max-consec, min-pause) for cross-day are delegated to the
 /// constraint-agent committee plus score-greedy because <c>DomainAwareReplaceValidator</c> is
-/// scoped to single-day swaps; this is an explicit trade-off documented in the spec.
+/// scoped to single-day swaps; this is an explicit trade-off documented in the spec. Hard planning rules
+/// (BitmapInput.Rules) are enforced on both paths: same-day inside the domain validator, cross-day here.
 /// </summary>
 public sealed class PlanMutationValidator
 {
@@ -114,6 +115,12 @@ public sealed class PlanMutationValidator
             {
                 return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, restDayIssue);
             }
+
+            var planningRuleIssue = DiagnoseCrossDayPlanningRules(bitmap, swap, cellA, cellB);
+            if (planningRuleIssue is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, planningRuleIssue);
+            }
         }
 
         if (!crossDay)
@@ -147,6 +154,21 @@ public sealed class PlanMutationValidator
 
         return _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowA, agentA, swap.DayA, cellB, "rowA")
             ?? _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowB, agentB, swap.DayB, cellA, "rowB");
+    }
+
+    /// <summary>
+    /// Hard planning rules of a cross-day swap: per receiving row, and on the combined effect when both cells belong
+    /// to one row (the same-day path checks them inside the domain validator).
+    /// </summary>
+    private string? DiagnoseCrossDayPlanningRules(HarmonyBitmap bitmap, PlanCellSwap swap, Cell cellA, Cell cellB)
+    {
+        if (swap.RowA == swap.RowB)
+        {
+            return _domainValidator.DiagnosePlanningRules(bitmap, swap.RowA, [(swap.DayA, cellB), (swap.DayB, cellA)], "rowA");
+        }
+
+        return _domainValidator.DiagnosePlanningRules(bitmap, swap.RowA, [(swap.DayA, cellB)], "rowA")
+            ?? _domainValidator.DiagnosePlanningRules(bitmap, swap.RowB, [(swap.DayB, cellA)], "rowB");
     }
 
     private static bool IsWork(CellSymbol symbol)

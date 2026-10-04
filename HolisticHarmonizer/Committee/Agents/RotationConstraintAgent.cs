@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
+using Klacks.ScheduleOptimizer.Harmonizer.Rules;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee.Agents;
@@ -9,10 +10,19 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee.Agents;
 /// Vetoes swaps that create three identical work-shift symbols in a row for either agent — a
 /// monotonous block that hurts shift rotation diversity. Approves swaps that break an existing
 /// 3-in-a-row pattern. Abstains otherwise. Free and Break cells are ignored: the rotation
-/// concept only applies to actively worked shift symbols.
+/// concept only applies to actively worked shift symbols. A symbol whose run length a MaxConsecutiveOfKind planning
+/// rule governs for the row's agent is left to that rule: the agent then ignores it (abstains on its account).
 /// </summary>
+/// <param name="governance">Runs governed by planning rules; null = none (unchanged behaviour)</param>
 public sealed class RotationConstraintAgent : IConstraintAgent
 {
+    private readonly PlanningRuleRunGovernance? _governance;
+
+    public RotationConstraintAgent(PlanningRuleRunGovernance? governance = null)
+    {
+        _governance = governance is { IsEmpty: false } ? governance : null;
+    }
+
     public string Name => "Rotation";
 
     public ConstraintAgentVerdict Evaluate(HarmonyBitmap before, PlanCellSwap swap)
@@ -44,9 +54,10 @@ public sealed class RotationConstraintAgent : IConstraintAgent
         return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Abstain, "swap does not affect rotation diversity");
     }
 
-    private static bool HasMonotoneBlock(HarmonyBitmap bitmap, int rowIndex, int dayIndex, CellSymbol symbol)
+    private bool HasMonotoneBlock(HarmonyBitmap bitmap, int rowIndex, int dayIndex, CellSymbol symbol)
     {
         if (!IsWork(symbol)) return false;
+        if (_governance is not null && _governance.Governs(bitmap.Rows[rowIndex].Id, symbol)) return false;
         var run = 1;
         for (var d = dayIndex - 1; d >= 0 && bitmap.GetCell(rowIndex, d).Symbol == symbol; d--)
         {

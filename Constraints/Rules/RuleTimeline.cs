@@ -29,6 +29,10 @@ internal readonly ref struct RuleTimeline
 
     public int AgentIndex => _agentIndex;
 
+    public int DayCount => _plan.DayCount;
+
+    public int NeighborDays => _boundary.NeighborDays;
+
     public RuleDay this[int dayIndex]
     {
         get

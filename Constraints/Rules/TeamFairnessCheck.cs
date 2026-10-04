@@ -48,6 +48,10 @@ internal sealed class TeamFairnessCheck : RuleCheck
 
     public override RuleSeverity Severity => RuleSeverity.Soft;
 
+    public override bool IsPerAgent => false;
+
+    public int WindowCount => _windowFirstDay.Length;
+
     public override void Evaluate(RulePlan plan, RuleBoundaryIndex boundary, RuleFindingCollector collector)
     {
         for (var window = 0; window < _windowFirstDay.Length; window++)
@@ -62,7 +66,7 @@ internal sealed class TeamFairnessCheck : RuleCheck
                     continue;
                 }
 
-                var value = Sum(plan, agent, _windowFirstDay[window], _windowLastDay[window]) * _scaleByAgent[agent];
+                var value = WindowValue(plan, agent, window);
                 participants++;
                 min = Math.Min(min, value);
                 max = Math.Max(max, value);
@@ -79,6 +83,45 @@ internal sealed class TeamFairnessCheck : RuleCheck
                 Report(collector, null, _windowFirstDay[window], spread, _maxSpread, spread - _maxSpread);
             }
         }
+    }
+
+    /// <summary>The compared value of one agent in one window: the metric sum, scaled to full time with ProRata.</summary>
+    public decimal WindowValue(RulePlan plan, int agent, int window)
+        => Sum(plan, agent, _windowFirstDay[window], _windowLastDay[window]) * _scaleByAgent[agent];
+
+    /// <summary>
+    /// Soft penalty from precomputed window values (one array per agent row, <paramref name="offset"/> = index of this
+    /// check's first window in it); equal to Weight times the Excess Evaluate reports. Non-participating agents are skipped.
+    /// </summary>
+    public double PenaltyFromValues(IReadOnlyList<decimal[]> valuesByAgent, int offset)
+    {
+        var penalty = 0d;
+        for (var window = 0; window < _windowFirstDay.Length; window++)
+        {
+            var participants = 0;
+            var min = decimal.MaxValue;
+            var max = decimal.MinValue;
+            for (var agent = 0; agent < valuesByAgent.Count; agent++)
+            {
+                if (!_participates[agent])
+                {
+                    continue;
+                }
+
+                var value = valuesByAgent[agent][offset + window];
+                participants++;
+                min = Math.Min(min, value);
+                max = Math.Max(max, value);
+            }
+
+            var spread = max - min;
+            if (participants >= MinimumParticipants && spread > _maxSpread)
+            {
+                penalty += Rule.Weight * (double)(spread - _maxSpread);
+            }
+        }
+
+        return penalty;
     }
 
     private int Sum(RulePlan plan, int agent, int firstDay, int lastDay)

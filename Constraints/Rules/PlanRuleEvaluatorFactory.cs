@@ -10,6 +10,10 @@ namespace Klacks.ScheduleOptimizer.Constraints.Rules;
 public static class PlanRuleEvaluatorFactory
 {
     public static IPlanRuleEvaluator Create(IReadOnlyList<PlanRule>? rules, RuleEvaluationContext context)
+        => CreateIncremental(rules, context);
+
+    /// <summary>As <see cref="Create"/>, typed for engines that evaluate moves row by row.</summary>
+    public static IIncrementalPlanRuleEvaluator CreateIncremental(IReadOnlyList<PlanRule>? rules, RuleEvaluationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         return rules is null || rules.Count == 0

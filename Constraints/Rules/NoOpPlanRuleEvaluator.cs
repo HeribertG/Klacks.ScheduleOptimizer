@@ -7,7 +7,7 @@
 
 namespace Klacks.ScheduleOptimizer.Constraints.Rules;
 
-public sealed class NoOpPlanRuleEvaluator : IPlanRuleEvaluator
+public sealed class NoOpPlanRuleEvaluator : IIncrementalPlanRuleEvaluator
 {
     private NoOpPlanRuleEvaluator()
     {
@@ -18,4 +18,21 @@ public sealed class NoOpPlanRuleEvaluator : IPlanRuleEvaluator
     public RuleEvaluation Evaluate(RulePlan plan) => RuleEvaluation.Empty;
 
     public bool WouldViolate(RulePlan plan, int agentIndex, int dayIndex, in RuleDay candidate) => false;
+
+    public int HardRuleCount => 0;
+
+    public bool HasSoftRules => false;
+
+    public int TeamWindowCount => 0;
+
+    public PlanRule HardRuleAt(int hardRuleIndex)
+        => throw new ArgumentOutOfRangeException(nameof(hardRuleIndex), hardRuleIndex, "An empty rule set has no hard rule.");
+
+    public void HardExcessOf(RulePlan plan, int agentIndex, Span<decimal> excessByHardRule)
+    {
+    }
+
+    public double AgentSoftPenalty(RulePlan plan, int agentIndex, Span<decimal> teamWindowValues) => 0d;
+
+    public double TeamSoftPenalty(IReadOnlyList<decimal[]> teamWindowValuesByAgent) => 0d;
 }

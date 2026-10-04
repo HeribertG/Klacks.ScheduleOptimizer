@@ -34,21 +34,30 @@ internal sealed class RestAfterKindCheck : RuleCheck
 
         for (var agent = 0; agent < plan.AgentCount; agent++)
         {
-            if (!AppliesTo(agent))
+            if (AppliesTo(agent))
             {
-                continue;
-            }
-
-            var timeline = RuleTimeline.Of(plan, boundary, agent);
-            for (var day = -_freeDays; day < plan.DayCount; day++)
-            {
-                var worked = WorkedDaysInRest(timeline, day);
-                if (worked > 0)
-                {
-                    Report(collector, agent, day, worked, _freeDays, worked);
-                }
+                Scan(RuleTimeline.Of(plan, boundary, agent), collector);
             }
         }
+    }
+
+    public override decimal AgentExcess(in RuleTimeline timeline)
+        => _freeDays == 0 ? 0m : Scan(timeline, collector: null);
+
+    private decimal Scan(in RuleTimeline timeline, RuleFindingCollector? collector)
+    {
+        var excess = 0m;
+        for (var day = -_freeDays; day < timeline.DayCount; day++)
+        {
+            var worked = WorkedDaysInRest(timeline, day);
+            if (worked > 0)
+            {
+                Report(collector, timeline.AgentIndex, day, worked, _freeDays, worked);
+                excess += worked;
+            }
+        }
+
+        return excess;
     }
 
     public override bool WouldViolate(in RuleTimeline timeline, int dayIndex)

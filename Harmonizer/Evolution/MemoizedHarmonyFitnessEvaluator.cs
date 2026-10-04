@@ -1,6 +1,5 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
-using System.Runtime.CompilerServices;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Scorer;
 
@@ -21,7 +20,7 @@ public sealed class MemoizedHarmonyFitnessEvaluator : IBitmapFitnessEvaluator
 
     private readonly HarmonyScorer _scorer;
     private readonly int _maxEntries;
-    private readonly Dictionary<RowKey, double> _cache = new(RowKeyComparer.Instance);
+    private readonly Dictionary<BitmapRowKey, double> _cache = new(BitmapRowKey.Comparer);
 
     public MemoizedHarmonyFitnessEvaluator(HarmonyScorer scorer, int maxEntries = DefaultMaxEntries)
     {
@@ -56,12 +55,7 @@ public sealed class MemoizedHarmonyFitnessEvaluator : IBitmapFitnessEvaluator
 
     private double ScoreRow(HarmonyBitmap bitmap, int row)
     {
-        var cells = new Cell[bitmap.DayCount];
-        for (var d = 0; d < cells.Length; d++)
-        {
-            cells[d] = bitmap.GetCell(row, d);
-        }
-        var key = new RowKey(bitmap.Rows[row], cells);
+        var key = BitmapRowKey.Of(bitmap, row);
         if (_cache.TryGetValue(key, out var cached))
         {
             Hits++;
@@ -76,39 +70,5 @@ public sealed class MemoizedHarmonyFitnessEvaluator : IBitmapFitnessEvaluator
         }
         _cache[key] = score;
         return score;
-    }
-
-    private readonly record struct RowKey(BitmapAgent Agent, Cell[] Cells);
-
-    private sealed class RowKeyComparer : IEqualityComparer<RowKey>
-    {
-        public static readonly RowKeyComparer Instance = new();
-
-        public bool Equals(RowKey x, RowKey y)
-        {
-            if (!ReferenceEquals(x.Agent, y.Agent) || x.Cells.Length != y.Cells.Length)
-            {
-                return false;
-            }
-            for (var i = 0; i < x.Cells.Length; i++)
-            {
-                if (!ReferenceEquals(x.Cells[i], y.Cells[i]))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        public int GetHashCode(RowKey key)
-        {
-            var hash = new HashCode();
-            hash.Add(RuntimeHelpers.GetHashCode(key.Agent));
-            foreach (var cell in key.Cells)
-            {
-                hash.Add(RuntimeHelpers.GetHashCode(cell));
-            }
-            return hash.ToHashCode();
-        }
     }
 }
