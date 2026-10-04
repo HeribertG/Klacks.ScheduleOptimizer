@@ -21,6 +21,7 @@ public sealed class MemoizedHarmonyFitnessEvaluator : IBitmapFitnessEvaluator
     private readonly HarmonyScorer _scorer;
     private readonly int _maxEntries;
     private readonly Dictionary<BitmapRowKey, double> _cache = new(BitmapRowKey.Comparer);
+    private readonly BitmapRowKeyBuffer _probe = new();
 
     public MemoizedHarmonyFitnessEvaluator(HarmonyScorer scorer, int maxEntries = DefaultMaxEntries)
     {
@@ -55,7 +56,7 @@ public sealed class MemoizedHarmonyFitnessEvaluator : IBitmapFitnessEvaluator
 
     private double ScoreRow(HarmonyBitmap bitmap, int row)
     {
-        var key = BitmapRowKey.Of(bitmap, row);
+        var key = _probe.Fill(bitmap, row);
         if (_cache.TryGetValue(key, out var cached))
         {
             Hits++;
@@ -68,7 +69,7 @@ public sealed class MemoizedHarmonyFitnessEvaluator : IBitmapFitnessEvaluator
         {
             _cache.Clear();
         }
-        _cache[key] = score;
+        _cache[key.ToOwned()] = score;
         return score;
     }
 }

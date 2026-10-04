@@ -12,7 +12,9 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Rules;
 /// threshold, a run the plan inherited) therefore never freeze the search; a move that keeps or reduces them passes.
 /// Every hard rule reports per agent, so only the rows a move changes are compared. Fast path: when the row after the
 /// move has no hard violation that involves a changed day (WouldViolate), no finding can have grown and the exact
-/// per-agent comparison is skipped.
+/// per-agent comparison is skipped. The row is projected incrementally (BitmapRuleRuntime.ProjectIntoScratch): the
+/// fast path reads neighbour days and whole counting periods, so it needs the full row, but only days whose cell
+/// changed since the last projection of that agent are re-projected.
 /// </summary>
 /// <param name="runtime">Rule state of the run</param>
 public sealed class PlanningRuleMoveGuard
@@ -44,18 +46,16 @@ public sealed class PlanningRuleMoveGuard
             return null;
         }
 
-        var projection = _runtime.Projection;
-        var agentIndex = projection.AgentIndexOf(bitmap.Rows[row]);
+        var agentIndex = _runtime.Projection.AgentIndexOf(bitmap.Rows[row]);
         if (agentIndex < 0)
         {
             return null;
         }
 
-        var plan = _runtime.Scratch;
-        projection.ProjectRow(bitmap, row, agentIndex, plan);
+        var plan = _runtime.ProjectIntoScratch(bitmap, row, agentIndex);
         foreach (var (day, cell) in replacements)
         {
-            plan.Set(agentIndex, day, projection.DayOf(cell, agentIndex));
+            _runtime.SetScratchDay(agentIndex, day, cell);
         }
 
         if (!InvolvesChangedDay(plan, agentIndex, replacements))
@@ -67,7 +67,7 @@ public sealed class PlanningRuleMoveGuard
         evaluator.HardExcessOf(plan, agentIndex, after);
         foreach (var (day, _) in replacements)
         {
-            plan.Set(agentIndex, day, projection.DayOf(bitmap.GetCell(row, day), agentIndex));
+            _runtime.SetScratchDay(agentIndex, day, bitmap.GetCell(row, day));
         }
 
         Span<decimal> before = ruleCount <= StackRuleLimit ? stackalloc decimal[ruleCount] : new decimal[ruleCount];

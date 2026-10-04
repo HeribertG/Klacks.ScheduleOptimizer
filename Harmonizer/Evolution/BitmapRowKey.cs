@@ -16,16 +16,8 @@ internal readonly record struct BitmapRowKey(BitmapAgent Agent, Cell[] Cells)
 {
     public static IEqualityComparer<BitmapRowKey> Comparer { get; } = new ReferenceComparer();
 
-    public static BitmapRowKey Of(HarmonyBitmap bitmap, int row)
-    {
-        var cells = new Cell[bitmap.DayCount];
-        for (var d = 0; d < cells.Length; d++)
-        {
-            cells[d] = bitmap.GetCell(row, d);
-        }
-
-        return new BitmapRowKey(bitmap.Rows[row], cells);
-    }
+    /// <summary>A key with its own copy of the cells - required before a probe from BitmapRowKeyBuffer is stored.</summary>
+    public BitmapRowKey ToOwned() => new(Agent, (Cell[])Cells.Clone());
 
     private sealed class ReferenceComparer : IEqualityComparer<BitmapRowKey>
     {
