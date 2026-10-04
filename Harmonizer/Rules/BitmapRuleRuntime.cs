@@ -100,6 +100,12 @@ public sealed class BitmapRuleRuntime
     /// <summary>Plan-wide evaluation of the bitmap through the projection (reporting, tests, benchmark).</summary>
     public RuleEvaluation Evaluate(HarmonyBitmap bitmap) => Evaluator.Evaluate(Projection.Project(bitmap));
 
+    /// <summary>Hard findings of the plan a run started from and of the plan it produced.</summary>
+    /// <param name="before">Bitmap the run started from</param>
+    /// <param name="after">Bitmap the run produced</param>
+    public PlanningRuleHardCounts CountHard(HarmonyBitmap before, HarmonyBitmap after)
+        => new(Evaluate(before).HardCount, Evaluate(after).HardCount);
+
     private static IReadOnlyList<BitmapAssignment>? WithoutIgnored(IReadOnlyList<BitmapAssignment>? assignments, IReadOnlySet<Guid> ignored)
         => assignments?.Where(a => a.WorkIds.Count == 0 || a.WorkIds.Any(id => !ignored.Contains(id))).ToList();
 }

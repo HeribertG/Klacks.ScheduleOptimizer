@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
+using Klacks.ScheduleOptimizer.Harmonizer.Rules;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
@@ -39,4 +40,9 @@ public sealed record HolisticHarmonizerRunResult(
     /// caller surfaces them as a warning (the run itself honoured every valid rule).
     /// </summary>
     public IReadOnlyList<Guid> InvalidPlanningRuleIds { get; init; } = [];
+
+    /// <summary>
+    /// Hard planning-rule findings before and after the run; null when the run carried no planning rule.
+    /// </summary>
+    public PlanningRuleHardCounts? PlanningRuleHardCounts { get; init; }
 }
