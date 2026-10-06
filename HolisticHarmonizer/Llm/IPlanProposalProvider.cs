@@ -21,8 +21,9 @@ public interface IPlanProposalProvider
     /// <summary>
     /// Sends a small PNG containing a deterministic secret token and verifies the model can read
     /// the token back. Holistic Harmonizer / Wizard 3 mutate a bitmap representation, so any model
-    /// that silently drops the attached image is unsuitable. Slower than <see cref="PingAsync"/>
-    /// (up to 90 s per model) but the only reliable filter for vision capability.
+    /// that silently drops the attached image is unsuitable. A failed read is repeated with a fresh token
+    /// before the model is reported as not vision-capable. Slower than <see cref="PingAsync"/>
+    /// (up to 90 s in total, all reads included) but the only reliable filter for vision capability.
     /// </summary>
     Task<PlanProposalPingResult> CapabilityCheckAsync(string modelId, CancellationToken cancellationToken);
 
