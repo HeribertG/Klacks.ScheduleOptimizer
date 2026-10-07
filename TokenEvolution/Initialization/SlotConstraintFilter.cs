@@ -39,44 +39,7 @@ public static class SlotConstraintFilter
         DateTime? slotEndUtc = null,
         SlotRelaxation relaxation = SlotRelaxation.None)
     {
-        // Qualification gating is a hard prerequisite and an O(1) lookup, so it runs first: an agent
-        // lacking a mandatory qualification of the shift may never receive it (empty set = no-op).
-        if (shiftRefId != Guid.Empty && !context.IsEligible(agent.Id, shiftRefId, date))
-        {
-            return false;
-        }
-
-        // Per-date contract availability wins over the static weekday flags: a contract starting
-        // or ending mid-period makes individual days non-workable regardless of the weekday.
-        var worksOnDate = context.WorksOnDate(agent.Id, date);
-        if (worksOnDate.HasValue)
-        {
-            if (!worksOnDate.Value)
-            {
-                return false;
-            }
-        }
-        else if (!RespectsWeekday(agent, date.DayOfWeek))
-        {
-            return false;
-        }
-
-        if (!agent.PerformsShiftWork && shiftTypeIndex != 0)
-        {
-            return false;
-        }
-
-        if (IsBlockedByBreak(agent.Id, date, context.BreakBlockers))
-        {
-            return false;
-        }
-
-        if (!RespectsKeyword(agent.Id, date, shiftTypeIndex, context.ScheduleCommands))
-        {
-            return false;
-        }
-
-        if (shiftRefId != Guid.Empty && IsBlacklistedShift(agent.Id, shiftRefId, context.ShiftPreferences))
+        if (ViolatesDayVeto(agent, date, shiftTypeIndex, shiftRefId, context))
         {
             return false;
         }
@@ -120,6 +83,74 @@ public static class SlotConstraintFilter
         }
 
         return !WeeklyRestDayGuard.Violates(agent, date, alreadyAssigned, context, slotStartUtc, slotEndUtc);
+    }
+
+    /// <summary>
+    /// The vetoes no coverage pressure may lift: qualification, contract day or weekday, the shift-work flag,
+    /// breaks, the day's schedule commands, the shift blacklist, the restricted time windows, a physical
+    /// collision and the weekly rest days of the schedule check. The forced-coverage path of the greedy seeder
+    /// relaxes everything else (hour caps, block length, package rest, minimum pause) but never these: a slot
+    /// it cannot fill under them stays open. Without slot times the window and collision checks are skipped.
+    /// </summary>
+    /// <param name="agent">Agent the slot would be assigned to.</param>
+    /// <param name="date">Calendar day the slot starts on.</param>
+    /// <param name="shiftTypeIndex">Shift kind of the slot (see ShiftTypeInference).</param>
+    /// <param name="shiftRefId">Shift id of the slot, Guid.Empty when unknown.</param>
+    /// <param name="context">Wizard context holding the blockers, commands and preferences.</param>
+    /// <param name="alreadyAssigned">Tokens placed so far, including locked ones.</param>
+    /// <param name="slotStartUtc">Slot start, null when unknown.</param>
+    /// <param name="slotEndUtc">Slot end, null when unknown.</param>
+    public static bool ViolatesAbsoluteVeto(
+        CoreAgent agent,
+        DateOnly date,
+        int shiftTypeIndex,
+        Guid shiftRefId,
+        CoreWizardContext context,
+        IReadOnlyList<CoreToken> alreadyAssigned,
+        DateTime? slotStartUtc,
+        DateTime? slotEndUtc)
+    {
+        if (ViolatesDayVeto(agent, date, shiftTypeIndex, shiftRefId, context))
+        {
+            return true;
+        }
+
+        if (slotStartUtc.HasValue && slotEndUtc.HasValue
+            && (IsBlockedByRestrictedWindow(shiftRefId, slotStartUtc.Value, slotEndUtc.Value, context.RestrictedTimeWindows)
+                || HasHardTemporalCollision(agent.Id, slotStartUtc.Value, slotEndUtc.Value, context, alreadyAssigned)))
+        {
+            return true;
+        }
+
+        return WeeklyRestDayGuard.Violates(agent, date, alreadyAssigned, context, slotStartUtc, slotEndUtc);
+    }
+
+    private static bool ViolatesDayVeto(
+        CoreAgent agent, DateOnly date, int shiftTypeIndex, Guid shiftRefId, CoreWizardContext context)
+    {
+        // Qualification gating is an O(1) lookup, so it runs first: an agent lacking a mandatory
+        // qualification of the shift may never receive it (empty set = no-op).
+        if (shiftRefId != Guid.Empty && !context.IsEligible(agent.Id, shiftRefId, date))
+        {
+            return true;
+        }
+
+        // Per-date contract availability wins over the static weekday flags: a contract starting
+        // or ending mid-period makes individual days non-workable regardless of the weekday.
+        var worksOnDate = context.WorksOnDate(agent.Id, date);
+        if (worksOnDate.HasValue ? !worksOnDate.Value : !RespectsWeekday(agent, date.DayOfWeek))
+        {
+            return true;
+        }
+
+        if (!agent.PerformsShiftWork && shiftTypeIndex != ShiftTypeInference.EarlyIndex)
+        {
+            return true;
+        }
+
+        return IsBlockedByBreak(agent.Id, date, context.BreakBlockers)
+            || !RespectsKeyword(agent.Id, date, shiftTypeIndex, context.ScheduleCommands)
+            || (shiftRefId != Guid.Empty && IsBlacklistedShift(agent.Id, shiftRefId, context.ShiftPreferences));
     }
 
     // K16 seasonal daily forbidden-time window. Always a hard veto (like a break blocker), independent of

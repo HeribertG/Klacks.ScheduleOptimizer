@@ -10,8 +10,10 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 /// Goal 2: every agent should reach its GuaranteedHours target, filled strictly top-down.
 /// Phase 1 walks agents in a fixed order (largest initial deficit first) and fills each agent
 /// completely up to its target before moving on; later agents take whatever slots remain.
-/// Phase 2 enforces 100% coverage: any leftover slot is assigned to the least-loaded agent
-/// (constraint-valid first, falling back to force-assign).
+/// Phase 2 enforces coverage: any leftover slot is assigned to the least-loaded agent (constraint-valid
+/// first, falling back to a forced assignment that relaxes hour caps, block length, package rest and minimum
+/// pause but never an absolute veto, see SlotConstraintFilter.ViolatesAbsoluteVeto; a slot no agent may take
+/// under those vetoes stays open).
 /// Slots already staffed by a locked work or by the carry-in pre-pass never enter either phase.
 /// </summary>
 public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
@@ -191,23 +193,11 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
 
         foreach (var agent in agents)
         {
-            // Qualification is a hard gate even when coverage is forced (requireValid=false):
-            // an unqualified agent is never an option, the slot stays empty instead of mis-staffed.
-            if (shiftRefId != Guid.Empty && !context.IsEligible(agent.Id, shiftRefId, slotDate))
-            {
-                continue;
-            }
-
-            // A physical collision is a hard gate even when coverage is forced (requireValid=false):
-            // leaving the slot open is a plan with a gap, double booking one agent is not a plan at all.
-            if (SlotConstraintFilter.HasHardTemporalCollision(agent.Id, slotStartUtc, slotEndUtc, context, tokensSoFar))
-            {
-                continue;
-            }
-
+            // Forced coverage (requireValid=false) relaxes only the soft caps. The absolute vetoes stay hard:
+            // the slot stays empty rather than staffed against a FREE day, a vacation, a blacklist, a collision.
             var admissible = requireValid
                 ? SlotConstraintFilter.IsValidAssignment(agent, slotDate, shiftTypeIndex, shiftRefId, slotHours, context, tokensSoFar, slotStartUtc, slotEndUtc)
-                : !WeeklyRestDayGuard.Violates(agent, slotDate, tokensSoFar, context, slotStartUtc, slotEndUtc);
+                : !SlotConstraintFilter.ViolatesAbsoluteVeto(agent, slotDate, shiftTypeIndex, shiftRefId, context, tokensSoFar, slotStartUtc, slotEndUtc);
             if (!admissible)
             {
                 continue;
