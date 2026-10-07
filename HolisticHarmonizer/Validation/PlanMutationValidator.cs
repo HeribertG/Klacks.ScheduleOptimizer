@@ -11,7 +11,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// Hard-constraint layer for Holistic Harmonizer. Wraps the Wizard 2 <see cref="DomainAwareReplaceValidator"/>
 /// for same-day swaps and applies cheap pre-checks (bounds, locks, no-op) before delegating.
 /// Cross-day swaps (DayA != DayB) are admitted when coverage-neutral — i.e. both cells share the
-/// same work-or-free state so the daily head-count on each affected day stays unchanged. The weekly
+/// same work-or-free state so the daily head-count on each affected day stays unchanged. Availability, the
+/// schedule-command directives and the shift blacklist are enforced hard on both receiving sides. The weekly
 /// rest days of the schedule check are enforced hard on both receiving rows of a cross-day swap. The
 /// remaining per-row constraint checks (max-consec, min-pause) for cross-day are delegated to the
 /// constraint-agent committee plus score-greedy because <c>DomainAwareReplaceValidator</c> is
@@ -108,6 +109,15 @@ public sealed class PlanMutationValidator
             if (eligibilityB is not null)
             {
                 return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, eligibilityB);
+            }
+
+            // Availability, schedule-command directives and the blacklist hold on the TARGET day of each moved
+            // cell (rowA gets cellB on dayA, rowB gets cellA on dayB) - also when both cells belong to one row.
+            var dayIssue = _domainValidator.DiagnoseDayRestrictions(crossDayAgentA, cellB, bitmap.Days[swap.DayA], "rowA")
+                ?? _domainValidator.DiagnoseDayRestrictions(crossDayAgentB, cellA, bitmap.Days[swap.DayB], "rowB");
+            if (dayIssue is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, dayIssue);
             }
 
             var restDayIssue = DiagnoseCrossDayWeeklyRestDays(bitmap, swap, cellA, cellB, crossDayAgentA, crossDayAgentB);

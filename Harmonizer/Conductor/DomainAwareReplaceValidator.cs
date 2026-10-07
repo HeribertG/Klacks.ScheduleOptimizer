@@ -205,22 +205,10 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             return null;
         }
 
-        if (!IsAvailableOnDate(receivingAgent.Id, date))
+        var dayIssue = DiagnoseDayRestrictions(receivingAgent, incomingCell, date, roleLabel);
+        if (dayIssue is not null)
         {
-            return $"{roleLabel} {receivingAgent.DisplayName} not available on {date:yyyy-MM-dd}";
-        }
-
-        var keywordIssue = DiagnoseKeywordRestriction(receivingAgent.Id, date, incomingCell.Symbol);
-        if (keywordIssue is not null)
-        {
-            return $"{roleLabel} {receivingAgent.DisplayName}: {keywordIssue}";
-        }
-
-        if (incomingCell.ShiftRefId is Guid shiftId
-            && receivingAgent.BlacklistedShiftIds is not null
-            && receivingAgent.BlacklistedShiftIds.Contains(shiftId))
-        {
-            return $"{roleLabel} {receivingAgent.DisplayName} blacklisted for shift {incomingCell.Symbol}";
+            return dayIssue;
         }
 
         var eligibilityIssue = DiagnoseEligibility(receivingAgent.Id, receivingAgent.DisplayName, incomingCell, date, roleLabel);
@@ -254,6 +242,44 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         }
 
         return DiagnoseWeeklyRestDays(bitmap, receivingRow, receivingAgent, dayIndex, incomingCell, roleLabel);
+    }
+
+    /// <summary>
+    /// Returns null if the agent may receive the incoming cell on the date under the day's availability (contract
+    /// day, FREE command, break), its schedule-command directive (OnlyX / NoX) and the agent's shift blacklist,
+    /// otherwise a short reason. A free incoming cell is always allowed. Public so Wizard 3's PlanMutationValidator
+    /// applies the same check on its cross-day branch, which never reaches <see cref="Diagnose"/>.
+    /// </summary>
+    /// <param name="agent">The receiving agent.</param>
+    /// <param name="incomingCell">The cell the agent would receive.</param>
+    /// <param name="date">The day the agent would receive it on.</param>
+    /// <param name="roleLabel">Label of the receiving side in the reason (rowA / rowB).</param>
+    public string? DiagnoseDayRestrictions(BitmapAgent agent, Cell incomingCell, DateOnly date, string roleLabel)
+    {
+        if (incomingCell.Symbol == CellSymbol.Free)
+        {
+            return null;
+        }
+
+        if (!IsAvailableOnDate(agent.Id, date))
+        {
+            return $"{roleLabel} {agent.DisplayName} not available on {date:yyyy-MM-dd}";
+        }
+
+        var keywordIssue = DiagnoseKeywordRestriction(agent.Id, date, incomingCell.Symbol);
+        if (keywordIssue is not null)
+        {
+            return $"{roleLabel} {agent.DisplayName}: {keywordIssue}";
+        }
+
+        if (incomingCell.ShiftRefId is Guid shiftId
+            && agent.BlacklistedShiftIds is not null
+            && agent.BlacklistedShiftIds.Contains(shiftId))
+        {
+            return $"{roleLabel} {agent.DisplayName} blacklisted for shift {incomingCell.Symbol}";
+        }
+
+        return null;
     }
 
     /// <summary>
