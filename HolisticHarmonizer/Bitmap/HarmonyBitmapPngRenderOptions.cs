@@ -12,12 +12,14 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Bitmap;
 /// <param name="HeaderTop">Height in pixels of the column header that shows day number and weekday letter</param>
 /// <param name="LockedBorderThickness">Stroke width in pixels for the thick black border drawn around locked or Break cells</param>
 /// <param name="TintWeekends">When true, Saturday and Sunday columns receive a light tint background</param>
+/// <param name="Scale">Factor applied to every size, font and stroke; above 1 gives a vision model more pixels per cell</param>
 public sealed record HarmonyBitmapPngRenderOptions(
     int CellSize = 24,
     int HeaderLeft = 32,
     int HeaderTop = 32,
     int LockedBorderThickness = 2,
-    bool TintWeekends = true)
+    bool TintWeekends = true,
+    float Scale = 1f)
 {
     public static HarmonyBitmapPngRenderOptions Default { get; } = new();
 }
