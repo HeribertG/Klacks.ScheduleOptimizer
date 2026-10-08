@@ -77,7 +77,12 @@ public sealed class PlanConstraintChecker
     {
         foreach (var a in assignments)
         {
-            if (eval.ContractDayByAgentDate.TryGetValue((a.AgentId, a.Date), out var match) && !match.WorksOnDay)
+            // Same precedence as CoreWizardContext.WorksOnDate and the tabu layer: the per-date contract day
+            // wins; without one the agent's static weekday flags decide.
+            var worksOnDay = eval.ContractDayByAgentDate.TryGetValue((a.AgentId, a.Date), out var match)
+                ? match.WorksOnDay
+                : !eval.AgentsById.TryGetValue(a.AgentId, out var agent) || agent.WorksOnWeekday(a.Date.DayOfWeek);
+            if (!worksOnDay)
             {
                 violations.Add(new ConstraintViolation(
                     ViolationKind.WorkOnDayViolation,

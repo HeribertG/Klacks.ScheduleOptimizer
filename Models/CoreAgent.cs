@@ -59,6 +59,19 @@ public record CoreAgent(
 
     public bool WorkOnSunday { get; init; } = false;
 
+    /// <summary>Static contract weekday flag for <paramref name="day"/>; the fallback when no per-date contract day exists.</summary>
+    public bool WorksOnWeekday(DayOfWeek day) => day switch
+    {
+        DayOfWeek.Monday => WorkOnMonday,
+        DayOfWeek.Tuesday => WorkOnTuesday,
+        DayOfWeek.Wednesday => WorkOnWednesday,
+        DayOfWeek.Thursday => WorkOnThursday,
+        DayOfWeek.Friday => WorkOnFriday,
+        DayOfWeek.Saturday => WorkOnSaturday,
+        DayOfWeek.Sunday => WorkOnSunday,
+        _ => false,
+    };
+
     /// <summary>Surcharge rate for night shifts, read through NightRateMode (Multiplier: fraction, e.g. 0.10 = 10%; otherwise an absolute amount). Used by the wizard for rough surcharge estimation toward GuaranteedHours.</summary>
     public decimal NightRate { get; init; } = 0;
 
