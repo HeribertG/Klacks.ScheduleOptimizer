@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Common.Rotation;
 using Klacks.ScheduleOptimizer.Constraints;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
@@ -431,26 +432,20 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         return owed == 0 ? 1 : kept / (double)owed;
     }
 
-    private const int ShiftTypeCycleLength = 3;
-    private const double NonCycleRotationPenalty = 0.5;
+    /// <summary>A day inside a block that departs from the block's kind costs half of a non-ideal block change:
+    /// rotation between blocks ranks above purity inside a block (SPEC-ROTATION-2026-10-08 rule 4).</summary>
+    private const double InBlockChangePenalty = 0.5;
+    private const double NonIdealTransitionPenalty = 1.0;
 
     /// <summary>
-    /// Scores the shift-type rotation rule (early → late → night). Blocks are maximal runs of
-    /// consecutive working dates per agent — token BlockIds are NOT used because every token
-    /// created by the auction, coverage strategy and repair carries its own fresh BlockId, which
-    /// made the old per-BlockId grouping evaluate nothing. Inside a block every day that departs
-    /// from the block's starting type is a violation, which is the fitness advocate of the rule
-    /// "the shift type stays constant inside one package" — measuring only backwards steps rated
-    /// early → late → night inside a single block as flawless. Across blocks the schedule must
-    /// rotate: starting the next block with the same type as the previous block is a full
-    /// violation, the cycle-next type is ideal, any other change costs half. Agents without
-    /// PerformsShiftWork are exempt — they may only work day shifts and must not be punished for
-    /// repeating them.
-    /// <para>
-    /// The comparison runs over calendar DAYS, not tokens: two non-overlapping shifts on one day
-    /// are an explicitly permitted split duty, and a token-wise comparison would book that
-    /// permission as a rotation violation. A day is represented by the type of its earliest shift.
-    /// </para>
+    /// Scores the rotation rule of <see cref="ShiftRotation"/> (owner decision 2026-10-08): blocks are runs of worked
+    /// days with less than 48 h of rest, every day departing from the block's starting kind costs
+    /// <see cref="InBlockChangePenalty"/>, every block change that misses the ideal successor (early, late, night,
+    /// early; disallowed kinds skipped; restart at early after a long pause) costs <see cref="NonIdealTransitionPenalty"/>.
+    /// The agent's worked shifts before the period take part as predecessors, so the first block is judged against
+    /// the carry-in. Agents without PerformsShiftWork are exempt. Token BlockIds are not used — every token created by
+    /// the auction, coverage strategy and repair carries its own fresh BlockId. A day is one unit: two shifts on one day
+    /// are a permitted split duty, not a rotation step.
     /// </summary>
     private static double ComputeBlockOrderingScore(CoreScenario scenario, CoreWizardContext context)
     {
@@ -463,76 +458,29 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             }
         }
 
-        double units = 0;
-        double violations = 0;
+        var rotation = RotationContext.For(context);
+        var total = default(RotationAssessment);
 
         foreach (var perAgent in scenario.Tokens.GroupBy(t => t.AgentId, StringComparer.Ordinal))
         {
-            if (!shiftWorkers.Contains(perAgent.Key))
+            var agentId = perAgent.Key;
+            if (!shiftWorkers.Contains(agentId))
             {
                 continue;
             }
 
-            var blocks = BuildDayBlocks(perAgent);
-
-            foreach (var block in blocks)
-            {
-                for (var i = 1; i < block.Count; i++)
-                {
-                    units++;
-                    if (block[i] != block[0])
-                    {
-                        violations++;
-                    }
-                }
-            }
-
-            for (var b = 1; b < blocks.Count; b++)
-            {
-                units++;
-                var previousType = blocks[b - 1][0];
-                var nextType = blocks[b][0];
-                if (nextType == previousType)
-                {
-                    violations += 1.0;
-                }
-                else if (nextType != (previousType + 1) % ShiftTypeCycleLength)
-                {
-                    violations += NonCycleRotationPenalty;
-                }
-            }
+            var days = ShiftRotation.DaysOf(perAgent
+                .Select(t => (t.Date, t.ShiftTypeIndex, t.StartAt, t.EndAt))
+                .Concat(rotation.BoundaryShiftsOf(agentId)));
+            total = total.Add(ShiftRotation.Assess(
+                days,
+                context.PeriodFrom,
+                (kind, blockDays) => rotation.IsAllowedOnAnyDay(agentId, kind, blockDays)));
         }
 
+        var units = total.InBlockSteps + total.Transitions;
+        var violations = total.InBlockChanges * InBlockChangePenalty + total.NonIdealTransitions * NonIdealTransitionPenalty;
         return units == 0 ? 1 : 1.0 - (violations / units);
-    }
-
-    /// <summary>
-    /// Maximal runs of consecutive worked calendar days of one agent, each day reduced to the shift
-    /// type of its earliest shift.
-    /// </summary>
-    /// <param name="agentTokens">Every token of one agent</param>
-    private static List<List<int>> BuildDayBlocks(IEnumerable<CoreToken> agentTokens)
-    {
-        var kindByDay = new Dictionary<DateOnly, int>();
-        foreach (var token in agentTokens.OrderBy(t => t.Date).ThenBy(t => t.StartAt))
-        {
-            kindByDay.TryAdd(token.Date, token.ShiftTypeIndex);
-        }
-
-        var blocks = new List<List<int>>();
-        DateOnly? previousDay = null;
-        foreach (var day in kindByDay.Keys.OrderBy(d => d))
-        {
-            if (previousDay is null || day.DayNumber - previousDay.Value.DayNumber > 1)
-            {
-                blocks.Add([]);
-            }
-
-            blocks[^1].Add(kindByDay[day]);
-            previousDay = day;
-        }
-
-        return blocks;
     }
 
     private static double ComputeBlacklistScore(CoreScenario scenario, CoreWizardContext context)

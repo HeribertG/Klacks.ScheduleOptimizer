@@ -352,7 +352,7 @@ public static class SlotConstraintFilter
         return false;
     }
 
-    private static bool IsBlacklistedShift(string agentId, Guid shiftRefId, IReadOnlyList<CoreShiftPreference> preferences)
+    internal static bool IsBlacklistedShift(string agentId, Guid shiftRefId, IReadOnlyList<CoreShiftPreference> preferences)
     {
         foreach (var preference in preferences)
         {
@@ -367,7 +367,7 @@ public static class SlotConstraintFilter
         return false;
     }
 
-    private static bool RespectsKeyword(
+    internal static bool RespectsKeyword(
         string agentId, DateOnly date, int shiftTypeIndex, IReadOnlyList<CoreScheduleCommand> commands)
     {
         foreach (var cmd in commands)
