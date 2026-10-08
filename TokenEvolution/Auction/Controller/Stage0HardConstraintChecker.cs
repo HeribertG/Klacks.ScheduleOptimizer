@@ -15,8 +15,6 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 /// </summary>
 public sealed class Stage0HardConstraintChecker
 {
-    private const string WeeklyRestDaysRule = "WeeklyRestDays";
-
     /// <summary>
     /// Validates an entire scenario by re-running the per-slot Stage 0 check for every
     /// non-locked token against the rest of the tokens. Used by GA operators (swap, crossover,
@@ -42,7 +40,7 @@ public sealed class Stage0HardConstraintChecker
 
             if (!agentLookup.TryGetValue(token.AgentId, out var agent))
             {
-                return new VetoVerdict(0, "UnknownAgent",
+                return new VetoVerdict(0, Stage0RuleNames.UnknownAgent,
                     $"Token references unknown agent {token.AgentId}.");
             }
 
@@ -92,7 +90,7 @@ public sealed class Stage0HardConstraintChecker
 
         if (agent is null)
         {
-            return new VetoVerdict(0, "UnknownAgent",
+            return new VetoVerdict(0, Stage0RuleNames.UnknownAgent,
                 $"Token references unknown agent {token.AgentId}.");
         }
 
@@ -128,7 +126,7 @@ public sealed class Stage0HardConstraintChecker
         var date = ParseDateOrNull(slot.Date);
         if (date is null)
         {
-            return new VetoVerdict(0, "InvalidSlotDate", $"Slot date '{slot.Date}' is not parseable.");
+            return new VetoVerdict(0, Stage0RuleNames.InvalidSlotDate, $"Slot date '{slot.Date}' is not parseable.");
         }
 
         var start = ParseTimeOrDefault(slot.StartTime, new TimeOnly(8, 0));
@@ -137,7 +135,7 @@ public sealed class Stage0HardConstraintChecker
 
         if (ExceedsMaxConsecutiveDays(agent, date.Value, alreadyAssigned, context, out var runLength, out var hardCap))
         {
-            return new VetoVerdict(0, "MaxConsecutiveDays",
+            return new VetoVerdict(0, Stage0RuleNames.MaxConsecutiveDays,
                 $"Agent {agent.Id} would create a {runLength}-day work block on {date.Value:yyyy-MM-dd}; hard cap is {hardCap}.");
         }
 
@@ -148,25 +146,25 @@ public sealed class Stage0HardConstraintChecker
         {
             if (!worksOnDate.Value)
             {
-                return new VetoVerdict(0, "ContractDay",
+                return new VetoVerdict(0, Stage0RuleNames.ContractDay,
                     $"Agent {agent.Id} has no active contract or no working day on {date.Value:yyyy-MM-dd}.");
             }
         }
         else if (!RespectsWeekday(agent, date.Value.DayOfWeek))
         {
-            return new VetoVerdict(0, "ContractWeekday",
+            return new VetoVerdict(0, Stage0RuleNames.ContractWeekday,
                 $"Agent {agent.Id} is not contracted to work on {date.Value.DayOfWeek}.");
         }
 
         if (!agent.PerformsShiftWork && shiftTypeIndex != 0)
         {
-            return new VetoVerdict(0, "PerformsShiftWork",
+            return new VetoVerdict(0, Stage0RuleNames.PerformsShiftWork,
                 $"Agent {agent.Id} does not participate in shift rotation; only early-shift permitted.");
         }
 
         if (IsBlockedByBreak(agent.Id, date.Value, context.BreakBlockers))
         {
-            return new VetoVerdict(0, "BreakBlocker",
+            return new VetoVerdict(0, Stage0RuleNames.BreakBlocker,
                 $"Agent {agent.Id} is blocked by an absence on {date.Value:yyyy-MM-dd}.");
         }
 
@@ -178,56 +176,56 @@ public sealed class Stage0HardConstraintChecker
 
         if (IsBlacklistedShift(agent.Id, slot.Id, context.ShiftPreferences))
         {
-            return new VetoVerdict(0, "BlacklistedShift",
+            return new VetoVerdict(0, Stage0RuleNames.BlacklistedShift,
                 $"Agent {agent.Id} is blacklisted from shift {slot.Id} on {date.Value:yyyy-MM-dd}.");
         }
 
         if (!IsQualifiedForShift(agent.Id, slot.Id, date.Value, context))
         {
-            return new VetoVerdict(0, "MissingQualification",
+            return new VetoVerdict(0, Stage0RuleNames.MissingQualification,
                 $"Agent {agent.Id} lacks a mandatory qualification required for shift {slot.Id} on {date.Value:yyyy-MM-dd}.");
         }
 
         if (agent.MaximumHours > 0 && ExceedsMaxHours(agent, slotHours, alreadyAssigned))
         {
-            return new VetoVerdict(0, "MaximumHoursContractCap",
+            return new VetoVerdict(0, Stage0RuleNames.MaximumHoursContractCap,
                 $"Agent {agent.Id} would exceed contract MaximumHours of {agent.MaximumHours}.");
         }
 
         if (ExceedsDailyHours(agent, date.Value, slotHours, context, alreadyAssigned))
         {
             var cap = ResolveDailyCap(agent, date.Value, context);
-            return new VetoVerdict(0, "MaxDailyHours",
+            return new VetoVerdict(0, Stage0RuleNames.MaxDailyHours,
                 $"Agent {agent.Id} would exceed daily-hours cap of {cap}h on {date.Value:yyyy-MM-dd}.");
         }
 
         if (HasOverlappingShift(agent.Id, slot, date.Value, alreadyAssigned))
         {
-            return new VetoVerdict(0, "OverlappingShift",
+            return new VetoVerdict(0, Stage0RuleNames.OverlappingShift,
                 $"Agent {agent.Id} already has a shift overlapping with {slot.StartTime}-{slot.EndTime} on {date.Value:yyyy-MM-dd}.");
         }
 
         if (HasOverlappingExistingWork(agent.Id, slot, date.Value, context.ExistingWorkBlockers))
         {
-            return new VetoVerdict(0, "ExistingWorkOverlap",
+            return new VetoVerdict(0, Stage0RuleNames.ExistingWorkOverlap,
                 $"Agent {agent.Id} already has an unlocked Work in the database overlapping with {slot.StartTime}-{slot.EndTime} on {date.Value:yyyy-MM-dd}.");
         }
 
         if (ViolatesMinPauseHours(agent, slot, date.Value, alreadyAssigned, context))
         {
-            return new VetoVerdict(0, "MinPauseHours",
+            return new VetoVerdict(0, Stage0RuleNames.MinPauseHours,
                 $"Agent {agent.Id} would have less than {agent.MinRestHours}h rest before/after {slot.StartTime}-{slot.EndTime} on {date.Value:yyyy-MM-dd}.");
         }
 
         if (IsBlockedByRestrictedWindow(slot, date.Value, context.RestrictedTimeWindows))
         {
-            return new VetoVerdict(0, "RestrictedTimeWindow",
+            return new VetoVerdict(0, Stage0RuleNames.RestrictedTimeWindow,
                 $"Shift {slot.Id} on {date.Value:yyyy-MM-dd} at {slot.StartTime}-{slot.EndTime} falls inside a seasonal restricted time window.");
         }
 
         if (ViolatesWeeklyRestDays(agent, slot, date.Value, alreadyAssigned, context))
         {
-            return new VetoVerdict(0, WeeklyRestDaysRule,
+            return new VetoVerdict(0, Stage0RuleNames.WeeklyRestDays,
                 $"Agent {agent.Id} would keep fewer than {agent.MinRestDays} rest day(s) in a calendar week touched by {slot.StartTime}-{slot.EndTime} on {date.Value:yyyy-MM-dd}.");
         }
 
@@ -339,7 +337,7 @@ public sealed class Stage0HardConstraintChecker
             switch (cmd.Keyword)
             {
                 case ScheduleCommandKeyword.Free:
-                    return new VetoVerdict(0, "KeywordFree",
+                    return new VetoVerdict(0, Stage0RuleNames.KeywordFree,
                         $"Agent {agentId} marked FREE on {date:yyyy-MM-dd}.");
                 case ScheduleCommandKeyword.OnlyEarly when shiftTypeIndex != 0:
                 case ScheduleCommandKeyword.NoEarly when shiftTypeIndex == 0:
@@ -347,7 +345,7 @@ public sealed class Stage0HardConstraintChecker
                 case ScheduleCommandKeyword.NoLate when shiftTypeIndex == 1:
                 case ScheduleCommandKeyword.OnlyNight when shiftTypeIndex != 2:
                 case ScheduleCommandKeyword.NoNight when shiftTypeIndex == 2:
-                    return new VetoVerdict(0, $"Keyword{name}",
+                    return new VetoVerdict(0, Stage0RuleNames.KeywordPrefix + name,
                         $"Slot type conflicts with keyword '{name}' on {date:yyyy-MM-dd}.");
             }
         }

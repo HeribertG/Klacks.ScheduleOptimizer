@@ -42,7 +42,8 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
         }
 
         // An agent without guaranteed hours (hourly wage) is a gap filler: it only fills what the guarantee
-        // holders leave. Its open-ended target would otherwise rank it first and starve the guarantees.
+        // holders leave. Its target falls back to FullTime, or is open-ended when FullTime is 0, and either
+        // can outrank a guarantee holder's remaining target and starve the guarantees.
         var agentQueue = context.Agents
             .OrderByDescending(a => a.GuaranteedHours > 0)
             .ThenByDescending(a => RemainingTarget(a))
