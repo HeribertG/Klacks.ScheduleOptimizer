@@ -8,8 +8,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 /// <summary>
 /// Goal 1 (highest priority): every shift slot must be covered.
 /// Goal 2: every agent should reach its GuaranteedHours target, filled strictly top-down.
-/// Phase 1 walks agents in a fixed order (largest initial deficit first) and fills each agent
-/// completely up to its target before moving on; later agents take whatever slots remain.
+/// Phase 1 walks agents in a fixed order (guarantee holders first, then largest initial deficit first) and
+/// fills each agent completely up to its target before moving on; later agents take whatever slots remain.
+/// Agents without guaranteed hours come after every guarantee holder: they are the gap fillers.
 /// Phase 2 enforces coverage: any leftover slot is assigned to the least-loaded agent (constraint-valid
 /// first, falling back to a forced assignment that relaxes hour caps, block length, package rest and minimum
 /// pause but never an absolute veto, see SlotConstraintFilter.ViolatesAbsoluteVeto; a slot no agent may take
@@ -40,8 +41,11 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
             scheduleIndex[context.Agents[i].Id] = i;
         }
 
+        // An agent without guaranteed hours (hourly wage) is a gap filler: it only fills what the guarantee
+        // holders leave. Its open-ended target would otherwise rank it first and starve the guarantees.
         var agentQueue = context.Agents
-            .OrderByDescending(a => RemainingTarget(a))
+            .OrderByDescending(a => a.GuaranteedHours > 0)
+            .ThenByDescending(a => RemainingTarget(a))
             .ThenByDescending(a => a.FullTime)
             .ThenBy(a => scheduleIndex[a.Id])
             .ToList();
