@@ -53,9 +53,9 @@ public sealed class ReassignMutation : ITokenOperator
             tokensWithoutCurrent,
             context.Wizard.Agents,
             context.Rng,
-            agent => SlotConstraintFilter.StartsOnDate(
+            agent => SlotPackageRules.StartsOnDate(
                     agent.Id, currentToken.Date.AddDays(-1), tokensWithoutCurrent, context.Wizard)
-                || SlotConstraintFilter.StartsOnDate(
+                || SlotPackageRules.StartsOnDate(
                     agent.Id, currentToken.Date.AddDays(+1), tokensWithoutCurrent, context.Wizard));
         // Without re-estimating, the token would carry the PREVIOUS agent's night and weekend rates
         // into the new agent's hours account.

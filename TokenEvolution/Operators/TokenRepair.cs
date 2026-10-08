@@ -421,8 +421,8 @@ public sealed class TokenRepair : ITokenOperator
     /// </summary>
     private static bool ExtendsAPackage(
         CoreAgent agent, DateOnly slotDate, IReadOnlyList<CoreToken> tokens, CoreWizardContext wizard)
-        => SlotConstraintFilter.StartsOnDate(agent.Id, slotDate.AddDays(-1), tokens, wizard)
-            || SlotConstraintFilter.StartsOnDate(agent.Id, slotDate.AddDays(+1), tokens, wizard);
+        => SlotPackageRules.StartsOnDate(agent.Id, slotDate.AddDays(-1), tokens, wizard)
+            || SlotPackageRules.StartsOnDate(agent.Id, slotDate.AddDays(+1), tokens, wizard);
 
     /// <summary>Stable reorder of one accuracy group: package extenders first, everyone else after.</summary>
     private static IEnumerable<CoreAgent> PreferExtenders(
