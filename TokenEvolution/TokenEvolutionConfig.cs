@@ -1,5 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
+
 namespace Klacks.ScheduleOptimizer.TokenEvolution;
 
 /// <summary>
@@ -78,6 +80,9 @@ public sealed record TokenEvolutionConfig
 
     /// <summary>Stage-3 weight for block temporal ordering (later shifts should follow earlier).</summary>
     public double FitnessStage3BlockOrder { get; init; } = 0.4;
+
+    /// <summary>Cost of a day inside a block that departs from the block's kind, in units of a non-ideal block change (0..1). Below 1 rotation between blocks ranks above purity inside a block (SPEC-ROTATION-2026-10-08 rule 4); near 0 the purity loses its search pressure (measured 2026-10-09: mixed packages 64 to 102).</summary>
+    public double FitnessRotationInBlockChangePenalty { get; init; } = AgentRotationAssessor.DefaultInBlockChangePenalty;
 
     /// <summary>Stage-3 weight for avoiding blacklisted shift preferences.</summary>
     public double FitnessStage3Blacklist { get; init; } = 0.3;

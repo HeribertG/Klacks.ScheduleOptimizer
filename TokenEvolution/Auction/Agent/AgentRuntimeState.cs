@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Common.Rotation;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
@@ -14,14 +15,16 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Agent;
 /// <param name="CurrentBlockLength">Length of the in-progress consecutive work block (0 if last day was rest)</param>
 /// <param name="LastWorkedDate">Most recent assigned date or null</param>
 /// <param name="DaysSinceShiftType">Index 0=early, 1=late, 2=night → days since last shift of that type (int.MaxValue if never)</param>
-/// <param name="CurrentBlockStartShiftType">Shift type the in-progress block started with (-1 = no block yet); used by the rotation rule when the next block begins</param>
+/// <param name="CurrentBlockStartShiftType">Shift type the in-progress calendar run started with (-1 = no block yet)</param>
+/// <param name="Rotation">Rotation position per <see cref="ShiftRotation"/> (48 h blocks, carry-in included); null before the first worked day</param>
 public sealed record AgentRuntimeState(
     string AgentId,
     double HoursAssignedThisRun,
     int CurrentBlockLength,
     DateOnly? LastWorkedDate,
     IReadOnlyList<int> DaysSinceShiftType,
-    int CurrentBlockStartShiftType = -1)
+    int CurrentBlockStartShiftType = -1,
+    RotationTrack? Rotation = null)
 {
     public static AgentRuntimeState Initial(string agentId) =>
         new(agentId, 0.0, 0, null, [int.MaxValue, int.MaxValue, int.MaxValue]);

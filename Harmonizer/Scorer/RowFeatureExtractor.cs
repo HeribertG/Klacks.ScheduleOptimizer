@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Common.Rotation;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 
 namespace Klacks.ScheduleOptimizer.Harmonizer.Scorer;
@@ -24,8 +25,9 @@ public static class RowFeatureExtractor
         var blockSizeUniformity = Uniformity(blocks.ConvertAll(b => (double)b.Length));
         var restPeriods = InterBlockRestLengths(blocks);
         var restUniformity = restPeriods.Count == 0 ? 1.0 : Uniformity(restPeriods);
-        var blockHomogeneity = ComputeBlockHomogeneity(bitmap, rowIndex, blocks);
-        var transitionCompliance = ComputeTransitionCompliance(bitmap, rowIndex, blocks);
+        var rotationDays = BitmapRotation.DaysOf(bitmap, rowIndex);
+        var blockHomogeneity = ComputeBlockHomogeneity(rotationDays);
+        var transitionCompliance = ComputeTransitionCompliance(bitmap, rotationDays);
         var shiftTypeRotation = ComputeShiftTypeRotation(bitmap, rowIndex, blocks);
         var preferredShiftFraction = ComputePreferredShiftFraction(bitmap, rowIndex);
 
@@ -183,71 +185,33 @@ public static class RowFeatureExtractor
         return rests;
     }
 
-    private static double ComputeBlockHomogeneity(HarmonyBitmap bitmap, int rowIndex, List<Block> blocks)
+    /// <summary>
+    /// Share of pure blocks under the rotation rule's block definition (<see cref="ShiftRotation"/>: a block ends only
+    /// after 48 h of rest), so one free day between two kinds no longer passes as two pure blocks.
+    /// </summary>
+    private static double ComputeBlockHomogeneity(IReadOnlyList<RotationDay> rotationDays)
     {
-        var homogeneous = 0;
-        foreach (var block in blocks)
-        {
-            if (IsBlockHomogeneous(bitmap, rowIndex, block))
-            {
-                homogeneous++;
-            }
-        }
-        return (double)homogeneous / blocks.Count;
-    }
-
-    private static bool IsBlockHomogeneous(HarmonyBitmap bitmap, int rowIndex, Block block)
-    {
-        var first = bitmap.GetCell(rowIndex, block.StartDay).Symbol;
-        for (var d = block.StartDay + 1; d <= block.EndDay; d++)
-        {
-            if (bitmap.GetCell(rowIndex, d).Symbol != first)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static double ComputeTransitionCompliance(HarmonyBitmap bitmap, int rowIndex, List<Block> blocks)
-    {
-        if (blocks.Count <= 1)
+        var rotationBlocks = ShiftRotation.BuildBlocks(rotationDays);
+        if (rotationBlocks.Count == 0)
         {
             return 1.0;
         }
 
-        var totalChanges = 0;
-        var compliant = 0;
-        for (var i = 1; i < blocks.Count; i++)
-        {
-            var fromSymbol = DominantSymbol(bitmap, rowIndex, blocks[i - 1]);
-            var toSymbol = DominantSymbol(bitmap, rowIndex, blocks[i]);
-            if (fromSymbol == toSymbol)
-            {
-                continue;
-            }
-            if (!IsScorableSymbol(fromSymbol) || !IsScorableSymbol(toSymbol))
-            {
-                continue;
-            }
-
-            totalChanges++;
-            if ((byte)toSymbol > (byte)fromSymbol)
-            {
-                compliant++;
-            }
-        }
-
-        if (totalChanges == 0)
-        {
-            return 1.0;
-        }
-        return (double)compliant / totalChanges;
+        var homogeneous = rotationBlocks.Count(block => block.All(day =>
+            day.FirstKindIndex == block[0].FirstKindIndex && day.LastKindIndex == block[0].FirstKindIndex));
+        return (double)homogeneous / rotationBlocks.Count;
     }
 
-    private static bool IsScorableSymbol(CellSymbol symbol)
+    /// <summary>
+    /// Share of block changes that go to the ideal successor of SPEC-ROTATION-2026-10-08 (early, late, night, early;
+    /// restart at early after a long pause), read through <see cref="BitmapRotation"/> and its known gaps.
+    /// </summary>
+    private static double ComputeTransitionCompliance(HarmonyBitmap bitmap, IReadOnlyList<RotationDay> rotationDays)
     {
-        return symbol == CellSymbol.Early || symbol == CellSymbol.Late || symbol == CellSymbol.Night;
+        var assessment = BitmapRotation.Assess(bitmap, rotationDays);
+        return assessment.Transitions == 0
+            ? 1.0
+            : 1.0 - ((double)assessment.NonIdealTransitions / assessment.Transitions);
     }
 
     private static CellSymbol DominantSymbol(HarmonyBitmap bitmap, int rowIndex, Block block)

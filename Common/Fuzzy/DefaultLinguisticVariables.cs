@@ -54,6 +54,14 @@ public static class DefaultLinguisticVariables
             ["Yes"] = new TrapezoidMf(0.5, 0.8, 1, 1),
         });
 
+        // Crisp RotationFit values: 0 conform, 1 change inside a block, 2 non-ideal block change (ShiftRotation.Fit).
+        dict["RotationFit"] = new("RotationFit", new Dictionary<string, MembershipFunction>
+        {
+            ["Conform"] = new TrapezoidMf(0, 0, 0.25, 0.5),
+            ["InBlockChange"] = new TriangularMf(0.5, 1, 1.5),
+            ["NonIdealTransition"] = new TrapezoidMf(1.5, 1.75, 2, 2),
+        });
+
         return dict;
     }
 

@@ -38,6 +38,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// <summary>Stage-3 block-ordering weight.</summary>
     public double Stage3BlockOrderWeight { get; init; } = 0.4;
 
+    /// <summary>Cost of an in-block kind change in units of a non-ideal block change.</summary>
+    public double RotationInBlockChangePenalty { get; init; } = AgentRotationAssessor.DefaultInBlockChangePenalty;
+
     /// <summary>Stage-3 shift-preference blacklist weight.</summary>
     public double Stage3BlacklistWeight { get; init; } = 0.3;
 
@@ -78,6 +81,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Stage1RankDecay = cfg.FitnessStage1RankDecay,
             Stage2Decay = cfg.FitnessStage2Decay,
             Stage3BlockOrderWeight = cfg.FitnessStage3BlockOrder,
+            RotationInBlockChangePenalty = cfg.FitnessRotationInBlockChangePenalty,
             Stage3BlacklistWeight = cfg.FitnessStage3Blacklist,
             Stage3LocationWeight = cfg.FitnessStage3Location,
             Stage3MaxGapWeight = cfg.FitnessStage3MaxGap,
@@ -432,22 +436,18 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         return owed == 0 ? 1 : kept / (double)owed;
     }
 
-    /// <summary>A day inside a block that departs from the block's kind costs half of a non-ideal block change:
-    /// rotation between blocks ranks above purity inside a block (SPEC-ROTATION-2026-10-08 rule 4).</summary>
-    private const double InBlockChangePenalty = 0.5;
-    private const double NonIdealTransitionPenalty = 1.0;
-
     /// <summary>
     /// Scores the rotation rule of <see cref="ShiftRotation"/> (owner decision 2026-10-08): blocks are runs of worked
     /// days with less than 48 h of rest, every day departing from the block's starting kind costs
-    /// <see cref="InBlockChangePenalty"/>, every block change that misses the ideal successor (early, late, night,
-    /// early; disallowed kinds skipped; restart at early after a long pause) costs <see cref="NonIdealTransitionPenalty"/>.
+    /// <see cref="RotationInBlockChangePenalty"/>, every block change that misses the ideal successor (early,
+    /// late, night, early; disallowed kinds skipped; restart at early after a long pause) costs
+    /// <see cref="AgentRotationAssessor.NonIdealTransitionPenalty"/>.
     /// The agent's worked shifts before the period take part as predecessors, so the first block is judged against
     /// the carry-in. Agents without PerformsShiftWork are exempt. Token BlockIds are not used — every token created by
     /// the auction, coverage strategy and repair carries its own fresh BlockId. A day is one unit: two shifts on one day
     /// are a permitted split duty, not a rotation step.
     /// </summary>
-    private static double ComputeBlockOrderingScore(CoreScenario scenario, CoreWizardContext context)
+    private double ComputeBlockOrderingScore(CoreScenario scenario, CoreWizardContext context)
     {
         var shiftWorkers = new HashSet<string>(StringComparer.Ordinal);
         foreach (var agent in context.Agents)
@@ -469,17 +469,11 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 continue;
             }
 
-            var days = ShiftRotation.DaysOf(perAgent
-                .Select(t => (t.Date, t.ShiftTypeIndex, t.StartAt, t.EndAt))
-                .Concat(rotation.BoundaryShiftsOf(agentId)));
-            total = total.Add(ShiftRotation.Assess(
-                days,
-                context.PeriodFrom,
-                (kind, blockDays) => rotation.IsAllowedOnAnyDay(agentId, kind, blockDays)));
+            total = total.Add(AgentRotationAssessor.Assess(perAgent, agentId, context, rotation));
         }
 
         var units = total.InBlockSteps + total.Transitions;
-        var violations = total.InBlockChanges * InBlockChangePenalty + total.NonIdealTransitions * NonIdealTransitionPenalty;
+        var violations = AgentRotationAssessor.Violations(total, RotationInBlockChangePenalty);
         return units == 0 ? 1 : 1.0 - (violations / units);
     }
 

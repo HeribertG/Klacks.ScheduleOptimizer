@@ -2,6 +2,8 @@
 
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.Common.Fuzzy;
+using Klacks.ScheduleOptimizer.Common.Rotation;
+using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Agent;
@@ -73,7 +75,32 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
             ["WeeklyLoad"] = weeklyLoad,
             ["IndexBonus"] = indexBonus,
             ["NewBlockSameType"] = ResolveNewBlockSameType(agent, state, slotTypeIndex, startsNewBlock),
+            [RotationFitVariable] = (double)ResolveRotationFit(agent, slot, state, context, slotTypeIndex),
         };
+    }
+
+    public const string RotationFitVariable = "RotationFit";
+
+    /// <summary>
+    /// How the slot fits the agent's rotation per <see cref="ShiftRotation.Fit"/> (SPEC-ROTATION-2026-10-08): conform,
+    /// change inside a block, or a non-ideal block change. Agents without PerformsShiftWork always conform.
+    /// </summary>
+    private static RotationFit ResolveRotationFit(
+        CoreAgent agent, CoreShift slot, AgentRuntimeState state, CoreWizardContext context, int slotTypeIndex)
+    {
+        if (!agent.PerformsShiftWork || !DateOnly.TryParse(slot.Date, out var slotDate))
+        {
+            return RotationFit.Conform;
+        }
+
+        var start = TimeOnly.TryParse(slot.StartTime, out var parsed) ? parsed : TimeOnly.MinValue;
+        var rotation = RotationContext.For(context);
+        return ShiftRotation.Fit(
+            state.Rotation,
+            slotTypeIndex,
+            slotDate,
+            slotDate.ToDateTime(start),
+            kind => !rotation.IsClosed(agent.Id, kind, slotDate));
     }
 
     private static bool StartsNewBlock(CoreShift slot, AgentRuntimeState state)
@@ -88,10 +115,9 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
     }
 
     /// <summary>
-    /// 1.0 when the agent would START A NEW BLOCK with the same shift type its previous block
-    /// used — the rotation rule (early → late → night) demands a type change between blocks.
-    /// Always 0 for agents without PerformsShiftWork: they may only work day shifts and must
-    /// not be penalised for repeating them.
+    /// 1.0 when the agent would start a new calendar run with the kind its previous run started with. Since round 4
+    /// (2026-10-09) no default rule reads it — rotation goes through <see cref="RotationFitVariable"/> — it stays an
+    /// input for custom rule bases and the diagnostics. Always 0 for agents without PerformsShiftWork.
     /// </summary>
     private static double ResolveNewBlockSameType(
         CoreAgent agent, AgentRuntimeState state, int slotTypeIndex, bool startsNewBlock)

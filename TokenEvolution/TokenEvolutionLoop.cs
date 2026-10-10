@@ -64,6 +64,9 @@ public sealed class TokenEvolutionLoop
     private readonly TopDownHandover _handover = new();
     private readonly SurplusHoursReturn _surplusReturn = new();
     private readonly ShiftKindBalancer _kindBalancer = new();
+    private readonly RotationBalancer _rotationBalancer = new();
+    private readonly RotationBalancer _prefixRotationBalancer = new(includePrefixSwaps: true);
+    private readonly PurityBalancer _purityBalancer = new();
     private readonly ObjectContinuityBalancer _orderBalancer = new();
 
     public TokenEvolutionLoop(
@@ -131,6 +134,29 @@ public sealed class TokenEvolutionLoop
     /// and the operator chain that produced the selected plan. Null keeps everything out of the run.
     /// </param>
     public CoreScenario Run(
+        CoreWizardContext context,
+        TokenEvolutionConfig config,
+        IProgress<TokenEvolutionProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        Action<string>? trace = null,
+        Action<string>? blockDiagnostics = null,
+        Action<string>? repairEscalations = null,
+        Action<string>? packageDiagnostics = null)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var evolved = Evolve(
+            context, config, progress, cancellationToken, trace, blockDiagnostics, repairEscalations, packageDiagnostics);
+        var best = ApplyFinalPasses(evolved, context, config, trace, cancellationToken);
+        trace?.Invoke($"Run: total {sw.ElapsedMilliseconds}ms");
+        ShortPackageTrace.ReportCount(packageDiagnostics, FinalPlanLabel, best, context);
+        return best;
+    }
+
+    /// <summary>
+    /// The evolutionary part of <see cref="Run"/> without the end passes; parameters as there. The result is not a
+    /// finished plan: <see cref="ApplyFinalPasses"/> must follow before it is handed to a caller.
+    /// </summary>
+    public CoreScenario Evolve(
         CoreWizardContext context,
         TokenEvolutionConfig config,
         IProgress<TokenEvolutionProgress>? progress = null,
@@ -342,9 +368,33 @@ public sealed class TokenEvolutionLoop
             }
         }
 
-        trace?.Invoke($"Run: total {sw.ElapsedMilliseconds}ms");
-        ShortPackageTrace.ReportCount(packageDiagnostics, FinalPlanLabel, best, context);
+        trace?.Invoke($"Run: evolution {sw.ElapsedMilliseconds}ms");
         return best;
+    }
+
+    /// <summary>
+    /// Runs the deterministic end passes on an evolved plan: whole-block rotation balance, purity balance, then the
+    /// rotation balance once more with prefix swaps and a final purity balance. The prefix swaps come after the first
+    /// purity pass on purpose: run earlier they block the purity swaps that dissolve mixed packages (measured
+    /// 2026-10-10). They sit outside the loop so their swaps never move the search paths of the population.
+    /// </summary>
+    /// <param name="evolved">Best plan of <see cref="Evolve"/>; never modified</param>
+    /// <param name="context">Wizard context the plan was evolved for</param>
+    /// <param name="config">Configuration the fitness evaluator is built from</param>
+    /// <param name="trace">Optional textual trace of the passes</param>
+    /// <param name="cancellationToken">Stops the passes and keeps the best plan reached so far</param>
+    public CoreScenario ApplyFinalPasses(
+        CoreScenario evolved,
+        CoreWizardContext context,
+        TokenEvolutionConfig config,
+        Action<string>? trace = null,
+        CancellationToken cancellationToken = default)
+    {
+        var evaluator = TokenFitnessEvaluator.Create(context, config);
+        var best = RunRotationBalance(_rotationBalancer, evolved, context, evaluator, trace, cancellationToken);
+        best = RunPurityBalance(best, context, evaluator, trace, cancellationToken);
+        best = RunRotationBalance(_prefixRotationBalancer, best, context, evaluator, trace, cancellationToken);
+        return RunPurityBalance(best, context, evaluator, trace, cancellationToken);
     }
 
     /// <summary>
@@ -693,6 +743,50 @@ public sealed class TokenEvolutionLoop
         }
 
         trace?.Invoke($"Run: shift-kind balance accepted (stage4={balanced.FitnessStage4:F4})");
+        return balanced;
+    }
+
+    /// <summary>
+    /// One rotation repair by the given balancer on the run's result. It sits after the loop on purpose: inside the loop every accepted
+    /// swap would re-enter the population and move the search paths of plans it never touched (the M10 lesson);
+    /// here a run where no swap qualifies returns its plan unchanged.
+    /// </summary>
+    private static CoreScenario RunRotationBalance(
+        RotationBalancer balancer,
+        CoreScenario scenario,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator,
+        Action<string>? trace = null,
+        CancellationToken cancellationToken = default)
+    {
+        var balanced = balancer.Apply(scenario, context, evaluator, trace, cancellationToken);
+        if (ReferenceEquals(balanced, scenario))
+        {
+            return scenario;
+        }
+
+        trace?.Invoke($"Run: rotation balance accepted (stage3={balanced.FitnessStage3:F4})");
+        return balanced;
+    }
+
+    /// <summary>
+    /// End pass after the rotation balance: same-day swaps that make blocks purer without costing rotation. Runs outside
+    /// the population for the same reason as the rotation balance.
+    /// </summary>
+    private CoreScenario RunPurityBalance(
+        CoreScenario scenario,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator,
+        Action<string>? trace = null,
+        CancellationToken cancellationToken = default)
+    {
+        var balanced = _purityBalancer.Apply(scenario, context, evaluator, cancellationToken);
+        if (ReferenceEquals(balanced, scenario))
+        {
+            return scenario;
+        }
+
+        trace?.Invoke($"Run: purity balance accepted (stage3={balanced.FitnessStage3:F4})");
         return balanced;
     }
 

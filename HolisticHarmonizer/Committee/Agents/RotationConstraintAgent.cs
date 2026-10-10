@@ -2,18 +2,19 @@
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Rules;
+using Klacks.ScheduleOptimizer.Harmonizer.Scorer;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee.Agents;
 
 /// <summary>
-/// Vetoes swaps that create three identical work-shift symbols in a row for either agent — a
-/// monotonous block that hurts shift rotation diversity. Approves swaps that break an existing
-/// 3-in-a-row pattern. Abstains otherwise. Free and Break cells are ignored: the rotation
-/// concept only applies to actively worked shift symbols. A symbol whose run length a MaxConsecutiveOfKind planning
-/// rule governs for the row's agent is left to that rule: the agent then ignores it (abstains on its account).
+/// Judges a swap by the shared rotation rule (SPEC-ROTATION-2026-10-08, read through <see cref="BitmapRotation"/>): it
+/// vetoes when the swap raises the rotation cost of the two rows together (kind changes inside a block, non-ideal block
+/// changes weighted twice), approves when it lowers it, and abstains otherwise. Until round 4 this agent vetoed three
+/// identical shifts in a row — exactly the pure block the rule asks for. A swap that moves a symbol whose run length a
+/// MaxConsecutiveOfKind planning rule governs for the row's agent is left to that rule: the agent then abstains.
 /// </summary>
-/// <param name="governance">Runs governed by planning rules; null = none (unchanged behaviour)</param>
+/// <param name="governance">Runs governed by planning rules; null = none</param>
 public sealed class RotationConstraintAgent : IConstraintAgent
 {
     private readonly PlanningRuleRunGovernance? _governance;
@@ -27,49 +28,38 @@ public sealed class RotationConstraintAgent : IConstraintAgent
 
     public ConstraintAgentVerdict Evaluate(HarmonyBitmap before, PlanCellSwap swap)
     {
-        var rowABeforeMonotone = HasMonotoneBlock(before, swap.RowA, swap.DayA, before.GetCell(swap.RowA, swap.DayA).Symbol);
-        var rowBBeforeMonotone = HasMonotoneBlock(before, swap.RowB, swap.DayB, before.GetCell(swap.RowB, swap.DayB).Symbol);
-
-        var symbolAfterRowA = before.GetCell(swap.RowB, swap.DayB).Symbol;
-        var symbolAfterRowB = before.GetCell(swap.RowA, swap.DayA).Symbol;
-        var rowAAfterMonotone = HasMonotoneBlock(before, swap.RowA, swap.DayA, symbolAfterRowA);
-        var rowBAfterMonotone = HasMonotoneBlock(before, swap.RowB, swap.DayB, symbolAfterRowB);
-
-        var introducesRowA = rowAAfterMonotone && !rowABeforeMonotone;
-        var introducesRowB = rowBAfterMonotone && !rowBBeforeMonotone;
-        var removesRowA = !rowAAfterMonotone && rowABeforeMonotone;
-        var removesRowB = !rowBAfterMonotone && rowBBeforeMonotone;
-
-        if (introducesRowA || introducesRowB)
+        var cellA = before.GetCell(swap.RowA, swap.DayA);
+        var cellB = before.GetCell(swap.RowB, swap.DayB);
+        if (IsGoverned(before, swap.RowA, cellB.Symbol) || IsGoverned(before, swap.RowB, cellA.Symbol))
         {
-            var who = introducesRowA && introducesRowB ? "both rows" : introducesRowA ? before.Rows[swap.RowA].DisplayName : before.Rows[swap.RowB].DisplayName;
-            return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Veto, $"creates 3+ identical shifts in a row for {who}");
+            return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Abstain, "a planning rule governs the moved shift kind");
         }
 
-        if (removesRowA || removesRowB)
+        var delta = swap.RowA == swap.RowB
+            ? RowDelta(before, swap.RowA, new Dictionary<int, Cell> { [swap.DayA] = cellB, [swap.DayB] = cellA })
+            : RowDelta(before, swap.RowA, new Dictionary<int, Cell> { [swap.DayA] = cellB })
+                + RowDelta(before, swap.RowB, new Dictionary<int, Cell> { [swap.DayB] = cellA });
+
+        if (delta > 0)
         {
-            return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Approve, "breaks an existing monotone shift block");
+            return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Veto, "worsens the shift rotation (kind change inside a block or a non-ideal block change)");
         }
 
-        return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Abstain, "swap does not affect rotation diversity");
+        if (delta < 0)
+        {
+            return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Approve, "improves the shift rotation");
+        }
+
+        return new ConstraintAgentVerdict(Name, ConstraintAgentVote.Abstain, "swap does not change the shift rotation");
     }
 
-    private bool HasMonotoneBlock(HarmonyBitmap bitmap, int rowIndex, int dayIndex, CellSymbol symbol)
+    private static int RowDelta(HarmonyBitmap bitmap, int rowIndex, IReadOnlyDictionary<int, Cell> incoming)
     {
-        if (!IsWork(symbol)) return false;
-        if (_governance is not null && _governance.Governs(bitmap.Rows[rowIndex].Id, symbol)) return false;
-        var run = 1;
-        for (var d = dayIndex - 1; d >= 0 && bitmap.GetCell(rowIndex, d).Symbol == symbol; d--)
-        {
-            run++;
-        }
-        for (var d = dayIndex + 1; d < bitmap.DayCount && bitmap.GetCell(rowIndex, d).Symbol == symbol; d++)
-        {
-            run++;
-        }
-        return run >= 3;
+        var beforeCost = BitmapRotation.Cost(bitmap, BitmapRotation.DaysOf(bitmap, rowIndex));
+        var afterCost = BitmapRotation.Cost(bitmap, BitmapRotation.DaysOf(bitmap, rowIndex, incoming));
+        return afterCost - beforeCost;
     }
 
-    private static bool IsWork(CellSymbol symbol)
-        => symbol == CellSymbol.Early || symbol == CellSymbol.Late || symbol == CellSymbol.Night || symbol == CellSymbol.Other;
+    private bool IsGoverned(HarmonyBitmap bitmap, int rowIndex, CellSymbol symbol)
+        => _governance is not null && _governance.Governs(bitmap.Rows[rowIndex].Id, symbol);
 }

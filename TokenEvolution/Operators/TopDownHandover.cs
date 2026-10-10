@@ -21,8 +21,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// <para>
 /// Deterministic by construction: no random source, roster order for receivers, reverse roster order
 /// for donors, and a fixed tie-break over the candidate shifts. Package integrity is preserved as far
-/// as the rank rule allows by preferring shifts that extend a block the receiver already has, keep
-/// that block's shift kind, and come from the donor's shortest block.
+/// as the rank rule allows by preferring shifts that extend a block the receiver already has, cost the
+/// least rotation for receiver and donor together (<see cref="HandoverGeometry.MovePenalty"/>,
+/// SPEC-ROTATION-2026-10-08), and come from the donor's shortest block.
 /// </para>
 /// </summary>
 public sealed class TopDownHandover
@@ -145,11 +146,14 @@ public sealed class TopDownHandover
         }
 
         var receiverDays = HandoverGeometry.BuildKindByDay(receiverTokens);
+        var receiverCost = HandoverGeometry.RotationCost(receiver.Id, receiverTokens, context);
 
         for (var donorIndex = context.Agents.Count - 1; donorIndex > receiverIndex; donorIndex--)
         {
             var donor = context.Agents[donorIndex];
             var donorDays = HandoverGeometry.BuildOccupiedDays(tokens, donor.Id, context);
+            var donorTokens = tokens.Where(t => string.Equals(t.AgentId, donor.Id, StringComparison.Ordinal)).ToList();
+            var donorCost = HandoverGeometry.RotationCost(donor.Id, donorTokens, context);
 
             var bestIndex = -1;
             var bestPenalty = int.MaxValue;
@@ -184,7 +188,8 @@ public sealed class TopDownHandover
                     continue;
                 }
 
-                var penalty = HandoverGeometry.ReceiverPenalty(receiverDays, token);
+                var penalty = HandoverGeometry.MovePenalty(
+                    receiver.Id, receiverDays, receiverTokens, receiverCost, donorTokens, donorCost, token, context);
                 var blockLength = HandoverGeometry.BlockLengthAt(donorDays, token.Date);
 
                 if (bestIndex < 0

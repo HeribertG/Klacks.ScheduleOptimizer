@@ -1,6 +1,8 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Common.Rotation;
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
@@ -16,9 +18,6 @@ internal static class HandoverGeometry
 {
     /// <summary>Penalty for a shift that starts an isolated new block for the receiver instead of extending one.</summary>
     internal const int NewBlockPenalty = 1;
-
-    /// <summary>Penalty for a shift whose kind differs from the neighbouring day of the receiver's block.</summary>
-    internal const int MixedKindPenalty = 1;
 
     /// <summary>
     /// Hours per agent including surcharges and the hours already worked in the period, so the two
@@ -44,26 +43,67 @@ internal static class HandoverGeometry
         return hours;
     }
 
-    /// <summary>
-    /// How badly a shift would damage the receiver's package structure: it costs when it opens an
-    /// isolated new block, and it costs when it extends a block with a foreign shift kind.
-    /// </summary>
-    /// <param name="receiverDays">Shift kind per worked day of the receiver</param>
-    /// <param name="token">Shift the receiver would take over</param>
-    internal static int ReceiverPenalty(IReadOnlyDictionary<DateOnly, int> receiverDays, CoreToken token)
-    {
-        var hasPrevious = receiverDays.TryGetValue(token.Date.AddDays(-1), out var previousKind);
-        var hasNext = receiverDays.TryGetValue(token.Date.AddDays(1), out var nextKind);
+    /// <summary>Weight of a non-ideal block change against a kind change inside a block: rotation before purity.</summary>
+    internal const int NonIdealTransitionWeight = 2;
 
-        if (!hasPrevious && !hasNext)
+    /// <summary>
+    /// Rotation cost of an agent's shifts per <see cref="ShiftRotation"/> (SPEC-ROTATION-2026-10-08): kind changes inside
+    /// a block plus <see cref="NonIdealTransitionWeight"/> per non-ideal block change, carry-in shifts as predecessors.
+    /// Zero for agents without PerformsShiftWork, whom the rotation does not bind.
+    /// </summary>
+    /// <param name="agentId">Agent whose shifts are judged</param>
+    /// <param name="agentTokens">The agent's shifts in the period</param>
+    /// <param name="context">Wizard context supplying the boundary shifts and the allowed kinds</param>
+    internal static int RotationCost(string agentId, IEnumerable<CoreToken> agentTokens, CoreWizardContext context)
+    {
+        if (!context.Agents.Any(a => a.PerformsShiftWork && string.Equals(a.Id, agentId, StringComparison.Ordinal)))
         {
-            return NewBlockPenalty + MixedKindPenalty;
+            return 0;
         }
 
-        var matches = (hasPrevious && previousKind == token.ShiftTypeIndex)
-            || (hasNext && nextKind == token.ShiftTypeIndex);
+        var rotation = RotationContext.For(context);
+        var days = ShiftRotation.DaysOf(agentTokens
+            .Select(t => (t.Date, t.ShiftTypeIndex, t.StartAt, t.EndAt))
+            .Concat(rotation.BoundaryShiftsOf(agentId)));
+        var assessment = ShiftRotation.Assess(
+            days, context.PeriodFrom, (kind, blockDays) => rotation.IsAllowedOnAnyDay(agentId, kind, blockDays));
+        return assessment.InBlockChanges + (assessment.NonIdealTransitions * NonIdealTransitionWeight);
+    }
 
-        return matches ? 0 : MixedKindPenalty;
+    /// <summary>
+    /// Weight that keeps the package structure strictly ahead of the rotation: package integrity (rule 6) ranks above
+    /// the shift-kind rotation, so no rotation gain may make an isolated new block look cheaper than extending one.
+    /// </summary>
+    internal const int StructureWeight = 1000;
+
+    /// <summary>
+    /// How badly moving a shift from its donor to the receiver damages both agents' packages, ordered strictly: opening
+    /// an isolated block for the receiver costs <see cref="NewBlockPenalty"/> times <see cref="StructureWeight"/>, and
+    /// only below that the change of both agents' <see cref="RotationCost"/> decides (negative when the move improves
+    /// the rotation).
+    /// </summary>
+    /// <param name="receiverId">Agent that would take the shift</param>
+    /// <param name="receiverDays">Shift kind per worked day of the receiver</param>
+    /// <param name="receiverTokens">The receiver's shifts</param>
+    /// <param name="receiverCost">The receiver's rotation cost before the move</param>
+    /// <param name="donorTokens">The donor's shifts, the moved one included</param>
+    /// <param name="donorCost">The donor's rotation cost before the move</param>
+    /// <param name="token">Shift that would move</param>
+    /// <param name="context">Wizard context</param>
+    internal static int MovePenalty(
+        string receiverId,
+        IReadOnlyDictionary<DateOnly, int> receiverDays,
+        IReadOnlyList<CoreToken> receiverTokens,
+        int receiverCost,
+        IReadOnlyList<CoreToken> donorTokens,
+        int donorCost,
+        CoreToken token,
+        CoreWizardContext context)
+    {
+        var isolated = !receiverDays.ContainsKey(token.Date.AddDays(-1)) && !receiverDays.ContainsKey(token.Date.AddDays(1));
+        var receiverAfter = RotationCost(receiverId, receiverTokens.Append(token), context);
+        var donorAfter = RotationCost(token.AgentId, donorTokens.Where(t => t != token), context);
+        return (isolated ? NewBlockPenalty * StructureWeight : 0) + (receiverAfter - receiverCost) + (donorAfter - donorCost);
     }
 
     /// <summary>

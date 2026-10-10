@@ -1,8 +1,10 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Common.Rotation;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Agent;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
+using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Conductor;
@@ -52,14 +54,24 @@ public sealed class SlotAuctioneer
 
         var states = new Dictionary<string, AgentRuntimeState>(StringComparer.Ordinal);
         var rosterPosition = new Dictionary<string, int>(StringComparer.Ordinal);
+        var rotation = RotationContext.For(context);
         foreach (var agent in context.Agents)
         {
             rosterPosition[agent.Id] = rosterPosition.Count;
-            states[agent.Id] = AgentRuntimeState.InitialFromBoundary(
+            var state = AgentRuntimeState.InitialFromBoundary(
                 agent.Id,
                 context.PeriodFrom,
                 context.BoundaryLockedWorks,
                 context.BoundaryExistingWorkBlockers);
+            foreach (var shift in rotation.BoundaryShiftsOf(agent.Id).OrderBy(s => s.StartAt))
+            {
+                state = state with
+                {
+                    Rotation = ShiftRotation.Advance(state.Rotation, shift.Date, shift.KindIndex, shift.StartAt, shift.EndAt),
+                };
+            }
+
+            states[agent.Id] = state;
         }
 
         foreach (var token in seed.Placed)
@@ -248,10 +260,13 @@ public sealed class SlotAuctioneer
             ? Math.Max(prev.CurrentBlockLength, 1)
             : continuesBlock ? prev.CurrentBlockLength + 1 : 1;
 
+        // Calendar days, as the field promises: the counters of the other kinds age by the days that passed since the
+        // last worked day, not by one per assignment (a split duty or a second shift on the same day ages nothing).
+        var elapsedDays = prev.LastWorkedDate.HasValue ? Math.Max(0, token.Date.DayNumber - prev.LastWorkedDate.Value.DayNumber) : 0;
         var daysSince = prev.DaysSinceShiftType.ToArray();
         for (var i = 0; i < daysSince.Length; i++)
         {
-            daysSince[i] = i == token.ShiftTypeIndex ? 0 : daysSince[i] == int.MaxValue ? int.MaxValue : daysSince[i] + 1;
+            daysSince[i] = i == token.ShiftTypeIndex ? 0 : daysSince[i] == int.MaxValue ? int.MaxValue : daysSince[i] + elapsedDays;
         }
 
         return prev with
@@ -263,6 +278,7 @@ public sealed class SlotAuctioneer
             CurrentBlockStartShiftType = continuesBlock && prev.CurrentBlockStartShiftType >= 0
                 ? prev.CurrentBlockStartShiftType
                 : token.ShiftTypeIndex,
+            Rotation = ShiftRotation.Advance(prev.Rotation, token.Date, token.ShiftTypeIndex, token.StartAt, token.EndAt),
         };
     }
 }

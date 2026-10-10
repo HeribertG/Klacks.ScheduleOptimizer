@@ -102,6 +102,58 @@ public static class ShiftRotation
     }
 
     /// <summary>
+    /// Rates one more shift against the agent's rotation so far. A second shift on the latest worked day is a split
+    /// duty and always conforms; inside a block the kind should equal the block's start kind; across a block boundary
+    /// it should be the ideal successor (no rotation owed when at most one kind is allowed).
+    /// </summary>
+    /// <param name="track">The agent's rotation position, or null before the first worked day</param>
+    /// <param name="kindIndex">Kind of the candidate shift</param>
+    /// <param name="date">Calendar day of the candidate shift</param>
+    /// <param name="startAt">Start of the candidate shift</param>
+    /// <param name="isAllowed">Whether a kind is allowed to the agent on that day</param>
+    public static RotationFit Fit(RotationTrack? track, int kindIndex, DateOnly date, DateTime startAt, Func<int, bool> isAllowed)
+    {
+        if (track is not { } current || date == current.Last.Date)
+        {
+            return RotationFit.Conform;
+        }
+
+        var candidate = new RotationDay(date, kindIndex, kindIndex, startAt, startAt);
+        if (!IsBlockBoundary(current.Last, candidate))
+        {
+            return kindIndex == current.BlockStartKind ? RotationFit.Conform : RotationFit.InBlockChange;
+        }
+
+        var ideal = IdealSuccessor(current.Last.LastKindIndex, IsLongPause(current.Last, candidate), isAllowed);
+        return ideal is null || ideal == kindIndex ? RotationFit.Conform : RotationFit.NonIdealTransition;
+    }
+
+    /// <summary>Moves the agent's rotation position past one more worked shift; shifts must arrive in date order.</summary>
+    /// <param name="track">Position before the shift, or null before the first worked day</param>
+    /// <param name="date">Calendar day of the shift</param>
+    /// <param name="kindIndex">Kind of the shift</param>
+    /// <param name="startAt">Start of the shift</param>
+    /// <param name="endAt">End of the shift</param>
+    public static RotationTrack Advance(RotationTrack? track, DateOnly date, int kindIndex, DateTime startAt, DateTime endAt)
+    {
+        var day = new RotationDay(date, kindIndex, kindIndex, startAt, endAt);
+        if (track is not { } current || IsBlockBoundary(current.Last, day))
+        {
+            return new RotationTrack(kindIndex, day);
+        }
+
+        if (date != current.Last.Date)
+        {
+            return current with { Last = day };
+        }
+
+        var merged = endAt >= current.Last.LastEnd
+            ? current.Last with { LastKindIndex = kindIndex, LastEnd = endAt }
+            : current.Last;
+        return current with { Last = merged };
+    }
+
+    /// <summary>
     /// Assesses one agent's days. Blocks entirely before <paramref name="countFrom"/> (carry-in) are only predecessors;
     /// a block change is counted when the new block starts on or after it.
     /// </summary>

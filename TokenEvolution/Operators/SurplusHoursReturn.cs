@@ -191,7 +191,8 @@ public sealed class SurplusHoursReturn
     /// Positions of the shifts the donor may hand to this receiver, best candidate first, or an empty
     /// sequence when it holds none that the receiver may legally take while the donor stays at or above
     /// its own guarantee. The ranking is the one the top-down handover uses: least damage to the
-    /// receiver's package first, then the donor's shortest block, then the earliest shift.
+    /// receiver's package and to both agents' rotation first (<see cref="HandoverGeometry.MovePenalty"/>),
+    /// then the donor's shortest block, then the earliest shift.
     /// </summary>
     private static IEnumerable<int> RankedReturns(
         CoreAgent donor,
@@ -204,6 +205,9 @@ public sealed class SurplusHoursReturn
         IReadOnlySet<(string AgentId, DateOnly Date, Guid ShiftRefId)> continuation)
     {
         var donorDays = HandoverGeometry.BuildOccupiedDays(tokens, donor.Id, context);
+        var donorTokens = TokensOf(tokens, donor.Id);
+        var donorCost = HandoverGeometry.RotationCost(donor.Id, donorTokens, context);
+        var receiverCost = HandoverGeometry.RotationCost(receiver.Id, receiverTokens, context);
         var candidates = new List<(int Index, int Penalty, int BlockLength, CoreToken Token)>();
 
         for (var i = 0; i < tokens.Count; i++)
@@ -241,7 +245,8 @@ public sealed class SurplusHoursReturn
 
             candidates.Add((
                 i,
-                HandoverGeometry.ReceiverPenalty(receiverDays, token),
+                HandoverGeometry.MovePenalty(
+                    receiver.Id, receiverDays, receiverTokens, receiverCost, donorTokens, donorCost, token, context),
                 HandoverGeometry.BlockLengthAt(donorDays, token.Date),
                 token));
         }
