@@ -24,6 +24,11 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// compactness term alone would let it pay with an average. Defaults to 0 so construction sites
 /// predating the component keep compiling.
 /// </param>
+/// <param name="MissingLevels">
+/// Qualification levels the tokens miss below NON-binding minimum levels (<see cref="Diagnostics.LevelShortfallTrace"/>);
+/// lower is better. A hard component: fairness never buys a less qualified staffing. Defaults to 0 so construction
+/// sites predating the component keep compiling.
+/// </param>
 public readonly record struct ParetoGateSnapshot(
     int Legality,
     int Stage0,
@@ -34,4 +39,5 @@ public readonly record struct ParetoGateSnapshot(
     double ShiftKindFairness,
     int OverlongPackages,
     int MixedPackages,
-    int ShortPackages = 0);
+    int ShortPackages = 0,
+    int MissingLevels = 0);

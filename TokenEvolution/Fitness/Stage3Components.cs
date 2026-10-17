@@ -14,9 +14,14 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 /// Share of calendar packages longer than the short-package bound (rule 6). Defaults to the
 /// neutral 1 so construction sites predating the term keep compiling and scoring as before.
 /// </param>
+/// <param name="LevelShortfall">
+/// 1 minus the missing qualification levels of the tokens relative to the worst case (every token four levels
+/// short); neutral 1 when the context carries no level shortfall.
+/// </param>
 public sealed record Stage3Components(
     double BlockOrder,
     double Blacklist,
     double Location,
     double MaxGap,
-    double PackageCompactness = 1);
+    double PackageCompactness = 1,
+    double LevelShortfall = 1);

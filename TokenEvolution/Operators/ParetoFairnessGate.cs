@@ -26,8 +26,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// times that gain as block-order loss, at most <see cref="MaxMixedPackagesTradeIncrease"/> extra
 /// mixed package and at most <see cref="MaxShortPackagesTradeIncrease"/> extra short package, all
 /// measured cumulatively against that origin snapshot, so a chain of swaps can never drift further
-/// than the single-swap allowance. The hard rules — legality, hour coverage, the blacklist share
-/// and the overlong count of rule 6 — are never tradable.
+/// than the single-swap allowance. The hard rules — legality, hour coverage, the blacklist share,
+/// the overlong count of rule 6 and the missing qualification levels below non-binding minimum levels — are never
+/// tradable.
 /// </para>
 /// <para>
 /// Rule 6 has no fitness representation, so the overlong-package count enters the snapshot explicitly
@@ -85,7 +86,8 @@ public static class ParetoFairnessGate
             ShiftKindFairness: detailed.Stage4Components.ShiftKindFairness,
             OverlongPackages: OverlongBlockTrace.Overlong(plan, context).Count,
             MixedPackages: MixedKindPackageTrace.Count(plan),
-            ShortPackages: ShortPackageTrace.Counts(plan, context).ShortCount);
+            ShortPackages: ShortPackageTrace.Counts(plan, context).ShortCount,
+            MissingLevels: LevelShortfallTrace.MissingLevels(plan, context));
     }
 
     /// <summary>
@@ -117,7 +119,8 @@ public static class ParetoFairnessGate
             && candidate.Stage1 >= current.Stage1
             && candidate.Stage2 >= current.Stage2
             && candidate.Blacklist >= current.Blacklist
-            && candidate.OverlongPackages <= current.OverlongPackages;
+            && candidate.OverlongPackages <= current.OverlongPackages
+            && candidate.MissingLevels <= current.MissingLevels;
         if (!hardRulesHold)
         {
             return false;

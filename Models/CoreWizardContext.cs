@@ -87,6 +87,20 @@ public class CoreWizardContext
         = new HashSet<(string, Guid, DateOnly)>();
 
     /// <summary>
+    /// Assignable (agent, shift, date) triples whose agent holds a mandatory qualification below a NON-binding
+    /// minimum level, with the summed number of missing levels. A soft Stage-3 penalty, never a veto. Empty means no
+    /// level penalty at all, so the fitness of such a run is unchanged.
+    /// </summary>
+    public IReadOnlyDictionary<(string AgentId, Guid ShiftId, DateOnly Date), int> LevelShortfall { get; init; }
+        = new Dictionary<(string, Guid, DateOnly), int>();
+
+    /// <summary>Missing qualification levels of the assignment; 0 when it is fully qualified or not listed.</summary>
+    public int LevelShortfallOf(string agentId, Guid shiftId, DateOnly date)
+        => LevelShortfall.Count == 0
+            ? 0
+            : LevelShortfall.GetValueOrDefault((agentId, shiftId, date));
+
+    /// <summary>
     /// True if the agent may hold the given shift on the date — i.e. the triple is not flagged
     /// ineligible. With an empty set the check is a no-op and every agent is eligible.
     /// </summary>

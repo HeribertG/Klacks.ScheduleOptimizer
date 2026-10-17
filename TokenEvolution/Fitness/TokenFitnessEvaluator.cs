@@ -53,6 +53,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// <summary>Stage-3 weight for holding the carried-in packages that are still open at the period start.</summary>
     public double Stage3CarryInWeight { get; init; } = 0.2;
 
+    /// <summary>Stage-3 weight of the qualification level-shortfall term (non-binding minimum levels).</summary>
+    public double Stage3LevelShortfallWeight { get; init; } = 0.3;
+
     /// <summary>Stage-3 package-compactness weight (rule 6).</summary>
     public double Stage3PackageLengthWeight { get; init; } = 0.4;
 
@@ -87,6 +90,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Stage3MaxGapWeight = cfg.FitnessStage3MaxGap,
             Stage3CarryInWeight = cfg.FitnessStage3CarryIn,
             Stage3PackageLengthWeight = cfg.FitnessStage3PackageLength,
+            Stage3LevelShortfallWeight = cfg.FitnessStage3LevelShortfall,
         };
     }
 
@@ -127,7 +131,8 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Blacklist: ComputeBlacklistScore(scenario, context),
             Location: ComputeLocationContinuityScore(scenario),
             MaxGap: ComputeMaxOptimalGapScore(scenario, context),
-            PackageCompactness: ComputePackageCompactnessScore(scenario, context));
+            PackageCompactness: ComputePackageCompactnessScore(scenario, context),
+            LevelShortfall: ComputeLevelShortfallScore(scenario, context));
 
         var stage4 = new Stage4Components(
             Fairness: ComputeFairnessScore(scenario, context),
@@ -355,8 +360,12 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var carryInWeight = packages.Count > 0 ? Stage3CarryInWeight : 0;
         var carryIn = carryInWeight > 0 ? ComputeCarryInContinuityScore(scenario, anchor, packages) : 0;
 
+        // Same rule for the level shortfall: without any non-binding level gap the term and its weight drop out.
+        var levelWeight = context.LevelShortfall.Count > 0 ? Stage3LevelShortfallWeight : 0;
+        var level = levelWeight > 0 ? ComputeLevelShortfallScore(scenario, context) : 0;
+
         var totalWeight = Stage3BlockOrderWeight + Stage3BlacklistWeight + Stage3LocationWeight
-            + Stage3MaxGapWeight + Stage3PackageLengthWeight + carryInWeight;
+            + Stage3MaxGapWeight + Stage3PackageLengthWeight + carryInWeight + levelWeight;
         if (totalWeight <= 0)
         {
             return 0;
@@ -367,7 +376,26 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
                 + location * Stage3LocationWeight
                 + gap * Stage3MaxGapWeight
                 + packageLength * Stage3PackageLengthWeight
-                + (carryIn * carryInWeight)) / totalWeight;
+                + (carryIn * carryInWeight)
+                + (level * levelWeight)) / totalWeight;
+    }
+
+    /// <summary>
+    /// Soft qualification-level term: 1 - (missing levels over all tokens) / (MaxLevelGapPerToken * tokens), each token
+    /// capped at MaxLevelGapPerToken (<see cref="LevelShortfallTrace"/>). An agent one level short costs a quarter of a
+    /// fully short one, so the GA prefers sufficiently qualified agents without ever vetoing a non-binding level
+    /// (binding levels are vetoed through IneligibleAssignments instead).
+    /// </summary>
+    private static double ComputeLevelShortfallScore(CoreScenario scenario, CoreWizardContext context)
+    {
+        if (scenario.Tokens.Count == 0 || context.LevelShortfall.Count == 0)
+        {
+            return 1;
+        }
+
+        var shortfall = LevelShortfallTrace.MissingLevels(scenario, context);
+        var worstCase = (double)LevelShortfallTrace.MaxLevelGapPerToken * scenario.Tokens.Count;
+        return Math.Max(0, 1 - (shortfall / worstCase));
     }
 
     /// <summary>

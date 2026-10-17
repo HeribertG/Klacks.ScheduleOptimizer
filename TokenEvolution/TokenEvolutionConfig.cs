@@ -93,6 +93,9 @@ public sealed record TokenEvolutionConfig
     /// <summary>Stage-3 weight for staying within the optimal intra-day gap between tokens.</summary>
     public double FitnessStage3MaxGap { get; init; } = 0.1;
 
+    /// <summary>Stage-3 weight for assigning agents who hold a mandatory qualification below a non-binding minimum level, penalised proportionally to the missing levels. Ignored, weight included, when the context has no level shortfall.</summary>
+    public double FitnessStage3LevelShortfall { get; init; } = 0.3;
+
     /// <summary>Stage-3 weight for holding the carried-in packages that are still open at the period start. Ignored, weight included, when the context has no open package.</summary>
     public double FitnessStage3CarryIn { get; init; } = 0.2;
 
