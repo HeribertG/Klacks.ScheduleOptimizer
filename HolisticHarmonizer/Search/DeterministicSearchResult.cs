@@ -2,6 +2,9 @@
 
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
+using Klacks.ScheduleOptimizer.Harmonizer.Global;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
+
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 
 /// <param name="AppliedBatches">Evaluations of the batches that were applied, in order (never WouldDegrade or Rejected).</param>
@@ -28,4 +31,13 @@ public sealed record DeterministicSearchResult(
 
     /// <summary>True when the evaluation budget over all passes was used up (passes skipped or cut short).</summary>
     public bool TotalEvaluationBudgetHit { get; init; }
+
+    /// <summary>Global harmony of the input bitmap (second instance); null when the harmony was not measured.</summary>
+    public GlobalHarmonyScore? HarmonyBefore { get; init; }
+
+    /// <summary>Global harmony after the search, including the region rebuild; null when the harmony was not measured.</summary>
+    public GlobalHarmonyScore? HarmonyAfter { get; init; }
+
+    /// <summary>Outcome of the region rebuild phase; null when the phase is switched off.</summary>
+    public RegionRebuildResult? RegionRebuild { get; init; }
 }

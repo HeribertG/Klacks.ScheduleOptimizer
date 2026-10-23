@@ -219,6 +219,19 @@ public sealed class PlanMutationValidator
         return null;
     }
 
+    /// <summary>
+    /// End-state check of a row after a multi-cell rebuild (Wizard 3 region rebuild): delegates to the domain
+    /// validator, which checks every changed cell in place and the planning rules against the original plan. Cells of a
+    /// region rebuild never change their day, so the seasonal forbidden windows (checked only for cross-day moves) cannot
+    /// be violated by it.
+    /// </summary>
+    public string? DiagnoseRowRebuild(HarmonyBitmap original, HarmonyBitmap rebuilt, int row, IReadOnlyList<int> changedDays)
+        => _domainValidator.DiagnoseRowRebuild(original, rebuilt, row, changedDays);
+
+    /// <summary>Same-day domain check of one cell as it stands; see <see cref="DomainAwareReplaceValidator.DiagnoseCellInPlace"/>.</summary>
+    public string? DiagnoseCellInPlace(HarmonyBitmap bitmap, int row, int day)
+        => _domainValidator.DiagnoseCellInPlace(bitmap, row, day);
+
     public static void Apply(HarmonyBitmap bitmap, PlanCellSwap swap)
     {
         ArgumentNullException.ThrowIfNull(bitmap);

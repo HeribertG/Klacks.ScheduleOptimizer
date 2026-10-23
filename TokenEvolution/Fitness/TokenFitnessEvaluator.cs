@@ -2,6 +2,7 @@
 
 using Klacks.ScheduleOptimizer.Common.Rotation;
 using Klacks.ScheduleOptimizer.Constraints;
+using Klacks.ScheduleOptimizer.Harmonizer.Global;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
 using Klacks.ScheduleOptimizer.TokenEvolution;
@@ -138,7 +139,8 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Fairness: ComputeFairnessScore(scenario, context),
             MinimumHours: ComputeMinimumHoursScore(scenario, context),
             BlockSymmetry: ComputeBlockSymmetryScore(scenario),
-            ShiftKindFairness: ComputeShiftKindFairnessScore(scenario, context));
+            ShiftKindFairness: ComputeShiftKindFairnessScore(scenario, context),
+            Rhythm: ComputeRhythmScore(scenario, context));
 
         return new DetailedFitnessResult(
             Stage0: scenario.FitnessStage0,
@@ -559,8 +561,65 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var minimum = ComputeMinimumHoursScore(scenario, context);
         var symmetry = ComputeBlockSymmetryScore(scenario);
         var kindFairness = ComputeShiftKindFairnessScore(scenario, context);
+        var rhythm = ComputeRhythmScore(scenario, context);
 
-        return (fairness + minimum + symmetry + kindFairness) / 4.0;
+        return (fairness + minimum + symmetry + kindFairness + rhythm) / 5.0;
+    }
+
+    /// <summary>
+    /// Canon rhythm between the shift-working agents: each agent's period as a row of days (early/late/night by the
+    /// token's shift kind, free otherwise, absences as wildcards), scored by <see cref="RhythmMatrix"/> - how well the
+    /// rows are shifted copies of one common pattern. Agents without shift work or without any token take no part.
+    /// Lowest stage on purpose: it can only decide between plans that are equal on legality, coverage, hours and the
+    /// soft constraints, so it never trades any of them for rhythm.
+    /// </summary>
+    internal static double ComputeRhythmScore(CoreScenario scenario, CoreWizardContext context)
+    {
+        var days = context.PeriodUntil.DayNumber - context.PeriodFrom.DayNumber + 1;
+        if (days <= 0)
+        {
+            return 1;
+        }
+
+        var rowsByAgent = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var agent in context.Agents)
+        {
+            if (agent.PerformsShiftWork)
+            {
+                rowsByAgent[agent.Id] = new byte[days];
+            }
+        }
+
+        foreach (var blocker in context.BreakBlockers)
+        {
+            if (!rowsByAgent.TryGetValue(blocker.AgentId, out var row))
+            {
+                continue;
+            }
+
+            for (var date = blocker.FromInclusive; date <= blocker.UntilInclusive; date = date.AddDays(1))
+            {
+                var index = date.DayNumber - context.PeriodFrom.DayNumber;
+                if (index >= 0 && index < days)
+                {
+                    row[index] = RhythmMatrix.Wildcard;
+                }
+            }
+        }
+
+        foreach (var token in scenario.Tokens)
+        {
+            var index = token.Date.DayNumber - context.PeriodFrom.DayNumber;
+            if (index < 0 || index >= days || !rowsByAgent.TryGetValue(token.AgentId, out var row) || row[index] != 0)
+            {
+                continue;
+            }
+
+            row[index] = (byte)(token.ShiftTypeIndex + 1);
+        }
+
+        var working = rowsByAgent.Values.Where(r => r.Any(v => v is >= 1 and <= 3)).ToList();
+        return working.Count < 2 ? 1 : new RhythmMatrix(working).Rhythm;
     }
 
     /// <summary>

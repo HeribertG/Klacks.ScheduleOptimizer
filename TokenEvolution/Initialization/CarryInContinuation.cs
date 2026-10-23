@@ -199,6 +199,30 @@ public static class CarryInContinuation
         return fixedWork;
     }
 
+    /// <summary>
+    /// Shift kind (0=early, 1=late, 2=night) of the fixed work each employee starts on a day, per employee and day. Days
+    /// without a started fixed work are absent. Reads the previous period and the locked works with the same sources as
+    /// <see cref="Detect(CoreWizardContext, DateOnly)"/>, so the rotation start aligns to the history this class sees.
+    /// </summary>
+    /// <param name="context">Wizard context supplying the fixed works</param>
+    public static IReadOnlyDictionary<string, Dictionary<DateOnly, int>> FixedShiftKinds(CoreWizardContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var kinds = new Dictionary<string, Dictionary<DateOnly, int>>(StringComparer.Ordinal);
+        foreach (var ((agentId, date), work) in BuildFixedWork(context))
+        {
+            if (!kinds.TryGetValue(agentId, out var byDay))
+            {
+                byDay = [];
+                kinds[agentId] = byDay;
+            }
+
+            byDay[date] = work.ShiftTypeIndex;
+        }
+
+        return kinds;
+    }
+
     private static Dictionary<DateOnly, List<CoreShift>> BuildSlotsByDate(CoreWizardContext context)
     {
         var slotsByDate = new Dictionary<DateOnly, List<CoreShift>>();

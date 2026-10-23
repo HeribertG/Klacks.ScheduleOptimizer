@@ -2,10 +2,12 @@
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Evolution;
+using Klacks.ScheduleOptimizer.Harmonizer.Global;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Candidates;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
@@ -54,6 +56,7 @@ public sealed class DeterministicHarmonyOptimizer
     private readonly DeterministicSearchOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly PlanMutationValidator? _sameDayValidator;
+    private readonly GlobalHarmonyEvaluator _harmony = new();
 
     /// <summary>
     /// Production wiring: evaluator, pool, fitness and same-day validator all come from one
@@ -116,8 +119,10 @@ public sealed class DeterministicHarmonyOptimizer
         var startTimestamp = _timeProvider.GetTimestamp();
         var start = BitmapCloner.Clone(working);
         var fitnessBefore = _fitness.Evaluate(start).Fitness;
+        var harmonyBefore = _harmony.Evaluate(start);
         HarmonyBitmap? bestBitmap = null;
         PassResult? best = null;
+        double? bestHarmony = null;
         long evaluations = 0;
         var maxCandidates = 0;
         var restartsRun = 0;
@@ -148,7 +153,23 @@ public sealed class DeterministicHarmonyOptimizer
             evaluations += pass.Evaluations;
             maxCandidates = Math.Max(maxCandidates, pass.MaxCandidates);
             wallClockHit |= pass.StopReason == DeterministicSearchStopReason.WallClockBudget;
+            if (_options.HarmonyGuard && !IsGuarded(restart)
+                && _harmony.Evaluate(candidate).Total < harmonyBefore.Total - ImprovementEpsilon)
+            {
+                // A free pass that ends below the start harmony may not win while the guard is on.
+                Report(progress, restart + 1, best?.FitnessAfter ?? fitnessBefore, best?.Applied.Count ?? 0, startTimestamp);
+                continue;
+            }
+
             if (best is null || pass.FitnessAfter > best.FitnessAfter + ImprovementEpsilon)
+            {
+                best = pass;
+                bestBitmap = candidate;
+                bestHarmony = null;
+            }
+            else if (_options.HarmonyTieBreak
+                && Math.Abs(pass.FitnessAfter - best.FitnessAfter) <= ImprovementEpsilon
+                && WinsHarmonyTie(candidate, bestBitmap!, ref bestHarmony))
             {
                 best = pass;
                 bestBitmap = candidate;
@@ -157,10 +178,29 @@ public sealed class DeterministicHarmonyOptimizer
             Report(progress, restart + 1, best.FitnessAfter, best.Applied.Count, startTimestamp);
         }
 
-        CopyCells(bestBitmap!, working);
+        // No qualifying pass (every free pass lowered the harmony and no guarded pass ran): the start plan stays.
+        best ??= new PassResult(
+            0,
+            [],
+            fitnessBefore,
+            wallClockHit ? DeterministicSearchStopReason.WallClockBudget
+                : totalBudgetHit ? DeterministicSearchStopReason.EvaluationLimit
+                : DeterministicSearchStopReason.LocalOptimum,
+            0,
+            0,
+            0);
+        bestBitmap ??= BitmapCloner.Clone(start);
+        CopyCells(bestBitmap, working);
+
+        // An evaluation cap or the wall clock ends the whole run; the region phase only runs after a search that finished.
+        var budgetSpent = wallClockHit || best.StopReason == DeterministicSearchStopReason.EvaluationLimit;
+        var regionRebuild = budgetSpent ? null : RunRegionRebuild(working, startTimestamp, cancellationToken);
+        var appliedBatches = regionRebuild is null
+            ? best.Applied
+            : best.Applied.Concat(regionRebuild.AppliedBatches).ToList();
 
         return new DeterministicSearchResult(
-            best!.Applied,
+            appliedBatches,
             fitnessBefore,
             _fitness.Evaluate(working).Fitness,
             wallClockHit ? DeterministicSearchStopReason.WallClockBudget : best.StopReason,
@@ -172,7 +212,45 @@ public sealed class DeterministicHarmonyOptimizer
             RestartsRun = restartsRun,
             BestRestart = best.Restart,
             TotalEvaluationBudgetHit = totalBudgetHit || evaluations >= _options.MaxTotalEvaluations,
+            HarmonyBefore = harmonyBefore,
+            HarmonyAfter = regionRebuild?.HarmonyAfter ?? _harmony.Evaluate(working),
+            RegionRebuild = regionRebuild,
         };
+    }
+
+    /// <summary>
+    /// Second instance on a tie: the challenger wins only with a strictly higher global harmony. The holder's harmony is
+    /// computed once and cached in <paramref name="holderHarmony"/>.
+    /// </summary>
+    private bool WinsHarmonyTie(HarmonyBitmap challenger, HarmonyBitmap holder, ref double? holderHarmony)
+    {
+        holderHarmony ??= _harmony.Evaluate(holder).Total;
+        var challengerHarmony = _harmony.Evaluate(challenger).Total;
+        if (challengerHarmony <= holderHarmony.Value + ImprovementEpsilon)
+        {
+            return false;
+        }
+
+        holderHarmony = challengerHarmony;
+        return true;
+    }
+
+    /// <summary>
+    /// Region rebuild after the best pass (see <see cref="RegionRebuildPhase"/>): raises the global harmony without
+    /// lowering the per-row fitness the local search reached. Needs the hard validator; skipped when the phase is off,
+    /// when no validator was wired, or when the search already spent its evaluation or wall-clock budget.
+    /// </summary>
+    private RegionRebuildResult? RunRegionRebuild(HarmonyBitmap working, long startTimestamp, CancellationToken cancellationToken)
+    {
+        if (_options.RegionRebuild is not { } regionOptions || _sameDayValidator is null
+            || _timeProvider.GetElapsedTime(startTimestamp) >= _options.WallClockBudget)
+        {
+            return null;
+        }
+
+        var admission = new RegionAdmission(_sameDayValidator, _fitness, new TargetHoursDeviationGuard());
+        var phase = new RegionRebuildPhase(admission, _harmony, regionOptions, _timeProvider);
+        return phase.Run(working, cancellationToken);
     }
 
     private PassResult RunPass(HarmonyBitmap working, int restart, long evaluationBudget, long startTimestamp, CancellationToken cancellationToken)
@@ -182,6 +260,8 @@ public sealed class DeterministicHarmonyOptimizer
         var tabu = new TabuList(_options.TabuTenure);
         var applied = new List<BatchEvaluation>();
         var current = _fitness.Evaluate(working).Fitness;
+        var guarded = IsGuarded(restart);
+        var harmonyFloor = guarded ? _harmony.Evaluate(working).Total : double.NegativeInfinity;
         var noImprovement = 0;
         var keptCount = 0;
         var iterationsRun = 0;
@@ -215,6 +295,28 @@ public sealed class DeterministicHarmonyOptimizer
                 RevertSteps(working, evaluation.AppliedSteps);
                 stopReason = DeterministicSearchStopReason.LocalOptimum;
                 break;
+            }
+
+            if (guarded && _harmony.Evaluate(working).Total < harmonyFloor - ImprovementEpsilon)
+            {
+                // Second instance: the move would break the rhythm between the rows below the pass start. Undo it,
+                // keep it out of the next iterations and count the iteration as one without improvement.
+                RevertSteps(working, evaluation.AppliedSteps);
+                tabu.Record(evaluation.AppliedSteps, iter);
+                noImprovement++;
+                if (interrupted is not null)
+                {
+                    stopReason = interrupted;
+                    break;
+                }
+
+                if (noImprovement >= _options.MaxNoImprovementIterations)
+                {
+                    stopReason = DeterministicSearchStopReason.NoImprovementLimit;
+                    break;
+                }
+
+                continue;
             }
 
             applied.Add(evaluation);
@@ -362,6 +464,16 @@ public sealed class DeterministicHarmonyOptimizer
         }
         return null;
     }
+
+    /// <summary>
+    /// With the harmony guard, the passes come in pairs (one per neighbourhood): the first pair runs free, as the plain
+    /// local search, the second pair guarded, and so on. A free pass that still ends at or above the start harmony may
+    /// win - it reached more fitness without breaking the rhythm in the end - a free pass that lowers the harmony may
+    /// not; the guarded passes always qualify. So the guard never costs fitness where the free search already keeps the
+    /// harmony, and protects it where it does not.
+    /// </summary>
+    private bool IsGuarded(int restart)
+        => _options.HarmonyGuard && (restart / NeighbourhoodCount) % 2 == 1;
 
     private bool UsesAllSameDaySwaps(int restart)
         => _options.IncludeAllSameDaySwaps || (_options.AlternateNeighbourhoods && restart % NeighbourhoodCount == 1);
