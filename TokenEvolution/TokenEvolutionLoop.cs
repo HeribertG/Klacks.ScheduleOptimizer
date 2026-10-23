@@ -96,7 +96,8 @@ public sealed class TokenEvolutionLoop
             new CoverageFirstTokenStrategy(),
             new GreedyTokenStrategy(),
             new RandomTokenStrategy(),
-            new WarmStartTokenStrategy());
+            new WarmStartTokenStrategy(),
+            new RotationTemplateTokenStrategy());
         return new TokenEvolutionLoop(
             builder,
             new BlockCrossover(),

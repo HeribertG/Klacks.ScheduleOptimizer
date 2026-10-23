@@ -10,8 +10,10 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 /// <param name="MinimumHours">Weighted coverage of each agent's contractual minimum hours</param>
 /// <param name="BlockSymmetry">Uniformity of consecutive-day block lengths</param>
 /// <param name="ShiftKindFairness">Evenness of each shift kind's count per eligible day across the agents allowed to hold it</param>
+/// <param name="Rhythm">Canon rhythm between the shift-working agents (Harmonizer.Global.RhythmMatrix); 1 when fewer than two of them work</param>
 public sealed record Stage4Components(
     double Fairness,
     double MinimumHours,
     double BlockSymmetry,
-    double ShiftKindFairness);
+    double ShiftKindFairness,
+    double Rhythm = 1d);

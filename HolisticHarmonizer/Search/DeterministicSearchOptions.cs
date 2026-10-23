@@ -1,5 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
+
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 
 /// <summary>
@@ -26,6 +28,15 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// get what is left. Sized so that it, not the wall clock, ends the search: the benchmark measured about 40 000
 /// evaluations per second (Release, developer machine), so 600 000 take about 15 s there and the wall-clock
 /// budget only binds on a machine more than six times slower.</param>
+/// <param name="RegionRebuild">Region rebuild after the local search (second instance: global harmony); null switches
+/// it off. On in <see cref="Harmonized"/>, off in <see cref="Default"/> and in explicitly constructed options.</param>
+/// <param name="HarmonyTieBreak">When two passes end on the same per-row fitness, the pass with the higher global
+/// harmony wins instead of the earlier one.</param>
+/// <param name="HarmonyGuard">"Nothing gets worse" for the global harmony: the passes alternate in pairs between the free
+/// local search and a guarded one that rejects every move taking the harmony below the pass start; a free pass may
+/// only win when it ends at or above the start harmony. So a per-row gain is never bought by breaking the rhythm
+/// between the rows, and the guard costs no fitness where the free search keeps the harmony anyway. On in
+/// <see cref="Harmonized"/>.</param>
 public sealed record DeterministicSearchOptions(
     int MaxIterations,
     int MaxNoImprovementIterations,
@@ -37,8 +48,13 @@ public sealed record DeterministicSearchOptions(
     int Restarts = DeterministicSearchOptions.DefaultRestarts,
     bool IncludeAllSameDaySwaps = false,
     bool AlternateNeighbourhoods = DeterministicSearchOptions.DefaultAlternateNeighbourhoods,
-    long MaxTotalEvaluations = DeterministicSearchOptions.DefaultMaxTotalEvaluations)
+    long MaxTotalEvaluations = DeterministicSearchOptions.DefaultMaxTotalEvaluations,
+    RegionRebuildOptions? RegionRebuild = null,
+    bool HarmonyTieBreak = DeterministicSearchOptions.DefaultHarmonyTieBreak,
+    bool HarmonyGuard = false)
 {
+    public const bool DefaultHarmonyTieBreak = true;
+
     public const int DefaultMaxIterations = 200;
     public const int DefaultMaxNoImprovementIterations = 5;
     public const int DefaultPairPoolCap = 100;
@@ -59,4 +75,15 @@ public sealed record DeterministicSearchOptions(
         TimeSpan.FromSeconds(DefaultWallClockBudgetSeconds),
         DefaultMaxEvaluations,
         DefaultRestarts);
+
+    /// <summary>
+    /// The production setting of Wizard 3: <see cref="Default"/> plus the second instance - the harmony guard keeps the
+    /// local search from lowering the global harmony, and the region rebuild raises it afterwards without lowering the
+    /// per-row fitness. <see cref="Default"/> stays the plain local search the search contracts are written against.
+    /// </summary>
+    public static DeterministicSearchOptions Harmonized { get; } = Default with
+    {
+        RegionRebuild = RegionRebuildOptions.Default,
+        HarmonyGuard = true,
+    };
 }

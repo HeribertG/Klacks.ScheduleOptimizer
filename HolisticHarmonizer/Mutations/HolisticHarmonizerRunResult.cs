@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
+using Klacks.ScheduleOptimizer.Harmonizer.Global;
 using Klacks.ScheduleOptimizer.Harmonizer.Rules;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
@@ -45,4 +46,12 @@ public sealed record HolisticHarmonizerRunResult(
     /// Hard planning-rule findings before and after the run; null when the run carried no planning rule.
     /// </summary>
     public PlanningRuleHardCounts? PlanningRuleHardCounts { get; init; }
+    /// <summary>
+    /// Global harmony (rhythm and fairness between the rows) of the input plan; null when the engine did not measure it.
+    /// </summary>
+    public GlobalHarmonyScore? HarmonyBefore { get; init; }
+    /// <summary>
+    /// Global harmony of the final plan; null when the engine did not measure it.
+    /// </summary>
+    public GlobalHarmonyScore? HarmonyAfter { get; init; }
 }

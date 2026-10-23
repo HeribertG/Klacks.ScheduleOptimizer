@@ -18,6 +18,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 /// <param name="greedy">Greedy strategy for contract-driven assignments</param>
 /// <param name="random">Random strategy for diversity</param>
 /// <param name="warmStart">Warm-start strategy that seeds from the previous period's accepted plan</param>
+/// <param name="rotationTemplate">Optional rotation (canon) start, see <see cref="RotationTemplateTokenStrategy"/>; null
+/// keeps the five original strategies. Its share comes out of the random remainder.</param>
 public sealed class TokenPopulationBuilder
 {
     /// <summary>Upper cap on the warm-start share so auction/random stay substantial and the GA cannot converge prematurely onto the old pattern.</summary>
@@ -28,6 +30,7 @@ public sealed class TokenPopulationBuilder
     private readonly ITokenPopulationStrategy _greedy;
     private readonly ITokenPopulationStrategy _random;
     private readonly ITokenPopulationStrategy _warmStart;
+    private readonly ITokenPopulationStrategy? _rotationTemplate;
     private readonly TopDownHandover _handover = new();
 
     public TokenPopulationBuilder(
@@ -35,13 +38,15 @@ public sealed class TokenPopulationBuilder
         ITokenPopulationStrategy coverageFirst,
         ITokenPopulationStrategy greedy,
         ITokenPopulationStrategy random,
-        ITokenPopulationStrategy warmStart)
+        ITokenPopulationStrategy warmStart,
+        ITokenPopulationStrategy? rotationTemplate = null)
     {
         _auction = auction;
         _coverageFirst = coverageFirst;
         _greedy = greedy;
         _random = random;
         _warmStart = warmStart;
+        _rotationTemplate = rotationTemplate;
     }
 
     /// <summary>Share of auction scenarios in the initial population (0..1). Default 0.5 in Phase 1 live-test.</summary>
@@ -52,6 +57,13 @@ public sealed class TokenPopulationBuilder
 
     /// <summary>Share of greedy scenarios in the initial population (0..1). Default 0.1.</summary>
     public double InitGreedyRatio { get; init; } = 0.1;
+
+    /// <summary>
+    /// Share of rotation-start (canon) scenarios in the initial population (0..1). Default 0.1. Taken from the random
+    /// remainder; ignored when no rotation strategy was passed or when it does not apply to the context
+    /// (<see cref="IConditionalTokenPopulationStrategy"/>) - then the population is exactly the one without it.
+    /// </summary>
+    public double InitRotationTemplateRatio { get; init; } = 0.1;
 
     /// <summary>Share of warm-start scenarios in the initial population (0..0.4; clamped). Default 0.2.</summary>
     public double InitWarmStartRatio { get; init; } = 0.2;
@@ -77,11 +89,16 @@ public sealed class TokenPopulationBuilder
         var auctionCount = Math.Min(populationSize - warmStartCount, (int)Math.Round(populationSize * effectiveAuctionRatio));
         var coverageCount = Math.Min(populationSize - warmStartCount - auctionCount, (int)Math.Round(populationSize * InitCoverageFirstRatio));
         var greedyCount = Math.Min(populationSize - warmStartCount - auctionCount - coverageCount, (int)Math.Round(populationSize * InitGreedyRatio));
-        var randomCount = populationSize - warmStartCount - auctionCount - coverageCount - greedyCount;
+        var rotationApplies = _rotationTemplate is not null
+            && (_rotationTemplate is not IConditionalTokenPopulationStrategy conditional || conditional.AppliesTo(context));
+        var rotationCount = !rotationApplies
+            ? 0
+            : Math.Min(populationSize - warmStartCount - auctionCount - coverageCount - greedyCount, (int)Math.Round(populationSize * InitRotationTemplateRatio));
+        var randomCount = populationSize - warmStartCount - auctionCount - coverageCount - greedyCount - rotationCount;
         var result = new List<CoreScenario>(populationSize);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        trace?.Invoke($"BuildPopulation: warmStart={warmStartCount} auction={auctionCount} coverageFirst={coverageCount} greedy={greedyCount} random={randomCount}");
+        trace?.Invoke($"BuildPopulation: warmStart={warmStartCount} auction={auctionCount} coverageFirst={coverageCount} greedy={greedyCount} rotation={rotationCount} random={randomCount}");
 
         var tw = sw.ElapsedMilliseconds;
         for (var i = 0; i < warmStartCount; i++)
@@ -106,6 +123,13 @@ public sealed class TokenPopulationBuilder
             result.Add(_greedy.BuildScenario(context, rng));
         }
         trace?.Invoke($"BuildPopulation: greedy {greedyCount} scenarios in {sw.ElapsedMilliseconds - t0}ms");
+
+        if (_rotationTemplate is not null && rotationCount > 0)
+        {
+            t0 = sw.ElapsedMilliseconds;
+            AddDeterministicStrategy(_rotationTemplate, rotationCount, result, context, rng, cancellationToken);
+            trace?.Invoke($"BuildPopulation: rotation 1 base + {Math.Max(0, rotationCount - 1)} perturbed clones in {sw.ElapsedMilliseconds - t0}ms");
+        }
 
         t0 = sw.ElapsedMilliseconds;
         for (var i = 0; i < randomCount; i++)

@@ -135,6 +135,51 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         return null;
     }
 
+    /// <summary>
+    /// End-state check of one cell as it stands in <paramref name="bitmap"/>: the same domain rules a receiving side
+    /// of a same-day swap must satisfy (day restrictions, eligibility, minimum pause to both neighbours, maximum
+    /// consecutive days, maximum weekly hours, weekly rest days), evaluated against the row's current neighbours.
+    /// Used by Wizard 3's region rebuild, which rearranges several cells at once and therefore cannot validate step by
+    /// step. A free cell is always valid. Planning rules are not part of this check, see <see cref="DiagnoseRowRebuild"/>.
+    /// </summary>
+    public string? DiagnoseCellInPlace(HarmonyBitmap bitmap, int row, int day)
+    {
+        ArgumentNullException.ThrowIfNull(bitmap);
+        return DiagnoseDomainReceivingSide(bitmap, row, bitmap.Rows[row], bitmap.Days[day], bitmap.GetCell(row, day), "row");
+    }
+
+    /// <summary>
+    /// End-state check of a rebuilt row: every changed cell must pass <see cref="DiagnoseCellInPlace"/> in the rebuilt
+    /// plan, and the changed cells together must create or worsen no hard planning-rule finding compared with
+    /// <paramref name="original"/>. Null when the row is valid, otherwise a short reason.
+    /// </summary>
+    /// <param name="original">The plan before the rebuild (reference for the planning-rule comparison).</param>
+    /// <param name="rebuilt">The plan after the rebuild.</param>
+    /// <param name="row">The rebuilt row.</param>
+    /// <param name="changedDays">Days of the row whose cell differs between the two plans.</param>
+    public string? DiagnoseRowRebuild(HarmonyBitmap original, HarmonyBitmap rebuilt, int row, IReadOnlyList<int> changedDays)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+        ArgumentNullException.ThrowIfNull(rebuilt);
+        ArgumentNullException.ThrowIfNull(changedDays);
+        foreach (var day in changedDays)
+        {
+            var issue = DiagnoseCellInPlace(rebuilt, row, day);
+            if (issue is not null)
+            {
+                return issue;
+            }
+        }
+
+        if (_planningRules is null || changedDays.Count == 0)
+        {
+            return null;
+        }
+
+        var replacements = changedDays.Select(d => (d, rebuilt.GetCell(row, d))).ToArray();
+        return DiagnosePlanningRules(original, row, replacements, "row");
+    }
+
     private static string? DiagnoseBitmapLocal(HarmonyBitmap bitmap, ReplaceMove move)
     {
         if (move.RowA == move.RowB)
@@ -453,10 +498,17 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             }
         }
 
+        // The incoming cell replaces the bitmap cell on dayIndex, so the morning of the next day is occupied when the
+        // INCOMING cell crosses midnight - the bitmap cell it replaces says nothing about that. Without this a night
+        // swapped onto the day before a block made that block one day longer than the walk counted.
+        var incomingCrossesMidnight = CellCrossesMidnight(incomingCell);
         var reachedEnd = true;
         for (var d = dayIndex + 1; d < bitmap.DayCount; d++)
         {
-            if (!IsCellOccupied(bitmap, receivingRow, d, agentId))
+            var occupied = d == dayIndex + 1
+                ? IsWorkingDayCell(bitmap.GetCell(receivingRow, d).Symbol) || incomingCrossesMidnight
+                : IsCellOccupied(bitmap, receivingRow, d, agentId);
+            if (!occupied)
             {
                 reachedEnd = false;
                 break;
@@ -466,6 +518,12 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         if (reachedEnd)
         {
             var probe = bitmap.Days[^1].AddDays(1);
+            if (dayIndex == bitmap.DayCount - 1 && incomingCrossesMidnight && !IsBoundaryDateOccupied(agentId, probe))
+            {
+                // The incoming night on the last day occupies the first morning after the bitmap.
+                run++;
+                probe = probe.AddDays(1);
+            }
             while (IsBoundaryDateOccupied(agentId, probe))
             {
                 run++;
