@@ -15,6 +15,14 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
 /// <param name="MaxStaleRounds">Consecutive rounds without a harmony gain before the phase stops.</param>
 /// <param name="Seed">Seed of the region proposer.</param>
 /// <param name="WallClockBudgetSeconds">Safety-net time budget of the whole phase.</param>
+/// <param name="ScreenedRegions">
+/// Coarse-to-fine region choice: regions added per round on top of the plain <paramref name="RegionsPerRound"/>. The
+/// proposer draws <c>ScreenedRegions x ScreeningFactor</c> further regions, scores each on the coarse level only
+/// (<see cref="RegionProposer.CoarseGain"/>: how many cells could be brought onto the canon by rearranging the day's
+/// cells among the region rows, rules ignored) and adds the best ones to the expensive beam rebuild. 0 keeps the plain
+/// proposer exactly. Default 8 (with factor 16): measured on scenarios 4 and 5 and on the region-rebuild fixture.
+/// </param>
+/// <param name="ScreeningFactor">Pool size per screened region (see <paramref name="ScreenedRegions"/>).</param>
 public sealed record RegionRebuildOptions(
     int Rounds = RegionRebuildOptions.DefaultRounds,
     int RegionsPerRound = RegionRebuildOptions.DefaultRegionsPerRound,
@@ -24,7 +32,9 @@ public sealed record RegionRebuildOptions(
     int BeamWidth = RegionRebuildOptions.DefaultBeamWidth,
     int MaxStaleRounds = RegionRebuildOptions.DefaultMaxStaleRounds,
     int Seed = RegionRebuildOptions.DefaultSeed,
-    int WallClockBudgetSeconds = RegionRebuildOptions.DefaultWallClockBudgetSeconds)
+    int WallClockBudgetSeconds = RegionRebuildOptions.DefaultWallClockBudgetSeconds,
+    int ScreenedRegions = RegionRebuildOptions.DefaultScreenedRegions,
+    int ScreeningFactor = RegionRebuildOptions.DefaultScreeningFactor)
 {
     public const int DefaultRounds = 6;
     public const int DefaultRegionsPerRound = 8;
@@ -35,6 +45,8 @@ public sealed record RegionRebuildOptions(
     public const int DefaultMaxStaleRounds = 2;
     public const int DefaultSeed = 42;
     public const int DefaultWallClockBudgetSeconds = 30;
+    public const int DefaultScreenedRegions = 8;
+    public const int DefaultScreeningFactor = 16;
 
     public static RegionRebuildOptions Default { get; } = new();
 }

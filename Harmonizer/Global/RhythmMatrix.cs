@@ -92,6 +92,32 @@ public sealed class RhythmMatrix
         return template < 0 ? 1d : _pair[row, template];
     }
 
+    /// <summary>Row that currently explains the working rows best (the canon template), -1 when fewer than two rows work.</summary>
+    public int TemplateRow => BestTemplate().Template;
+
+    /// <summary>
+    /// Symbol the canon expects for <paramref name="row"/> on every day: the template row read at the cyclic shift that
+    /// matches this row best (the alignment <see cref="RowFit"/> is measured at). <see cref="Wildcard"/> where the
+    /// template has an absence; null when the row does not work or there is no template.
+    /// </summary>
+    public byte[]? ExpectedRow(int row)
+    {
+        var template = BestTemplate().Template;
+        if (template < 0 || !_working[row])
+        {
+            return null;
+        }
+
+        var shift = BestShift(_symbols[row], _symbols[template]);
+        var expected = new byte[_days];
+        for (var d = 0; d < _days; d++)
+        {
+            expected[d] = _symbols[template][(d + shift) % _days];
+        }
+
+        return expected;
+    }
+
     /// <summary>Reloads the given rows from the bitmap and recomputes their pairs.</summary>
     public void Refresh(HarmonyBitmap bitmap, IEnumerable<int> rows)
     {
@@ -183,6 +209,46 @@ public sealed class RhythmMatrix
         var value = a == b ? 1d : BestShiftSimilarity(_symbols[a], _symbols[b]);
         _pair[a, b] = value;
         _pair[b, a] = value;
+    }
+
+    private int BestShift(byte[] a, byte[] b)
+    {
+        var best = -1d;
+        var bestShift = 0;
+        for (var shift = 0; shift < _days; shift++)
+        {
+            var value = Similarity(a, b, shift);
+            if (value > best)
+            {
+                best = value;
+                bestShift = shift;
+            }
+        }
+
+        return bestShift;
+    }
+
+    private double Similarity(byte[] a, byte[] b, int shift)
+    {
+        var comparable = 0;
+        var matches = 0;
+        for (var d = 0; d < _days; d++)
+        {
+            var x = a[d];
+            var y = b[(d + shift) % _days];
+            if (x == Wildcard || y == Wildcard)
+            {
+                continue;
+            }
+
+            comparable++;
+            if (x == y)
+            {
+                matches++;
+            }
+        }
+
+        return comparable == 0 ? 0d : (double)matches / comparable;
     }
 
     private double BestShiftSimilarity(byte[] a, byte[] b)
