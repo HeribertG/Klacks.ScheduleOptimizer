@@ -48,4 +48,10 @@ public class CoreScenario
 
     /// <summary>Keyword mode of the run that produced the scenario; the apply partition reads it.</summary>
     public KeywordMode KeywordMode { get; set; } = KeywordMode.Hard;
+
+    /// <summary>
+    /// Ids of every agent the run planned, also those that hold no token; the keyword-wish count after apply reads
+    /// it so an unfulfilled wish of an agent without a shift is counted. Empty when the producer did not set it.
+    /// </summary>
+    public List<string> PlannedAgentIds { get; set; } = [];
 }
