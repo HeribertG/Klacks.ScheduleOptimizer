@@ -6,7 +6,9 @@ using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 namespace Klacks.ScheduleOptimizer.Constraints;
 
 /// <summary>
-/// Engine-neutral plan-level hard-constraint checker. Operates on a flat list of
+/// Engine-neutral plan-level hard-constraint checker. The keyword restrictions count as violations in
+/// <see cref="KeywordMode.Hard"/> only; in Soft mode they are wishes, counted by the keyword-wish tier
+/// (<see cref="Keywords.KeywordWishCalculator"/>) below coverage instead of as legality defects. Operates on a flat list of
 /// <see cref="AssignmentView"/> plus the <see cref="CoreWizardContext"/>, so the identical rule set
 /// runs against a Wizard-1 token genome (via TokenConstraintChecker) and a Harmonizer bitmap
 /// (via the objective adapter). The detection logic is lifted verbatim from the former
@@ -29,7 +31,10 @@ public sealed class PlanConstraintChecker
 
         CheckWorkOnDay(assignments, eval, violations);
         CheckPerformsShiftWork(assignments, eval, violations);
-        CheckPerDayKeyword(assignments, eval, violations);
+        if (context.KeywordMode != KeywordMode.Soft)
+        {
+            CheckPerDayKeyword(assignments, eval, violations);
+        }
         CheckShiftBlacklist(assignments, eval, violations);
         CheckBreakBlocker(assignments, eval, violations);
         CheckMaxConsecutiveDays(assignments, context, eval, violations);

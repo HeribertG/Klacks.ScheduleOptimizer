@@ -7,7 +7,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 
 /// <summary>
 /// Stage 0 — Tabu. These rules can NEVER be broken: availability, contract weekday,
-/// FREE keyword, MaxDailyHours (per-agent), MinPauseHours (per-agent), MaxConsecutiveDays
+/// the keyword restrictions (FREE, OnlyX, NoX) in <see cref="KeywordMode.Hard"/> only - in Soft mode they move to
+/// <see cref="Stage1SoftConstraintChecker"/>, MaxDailyHours (per-agent), MinPauseHours (per-agent), MaxConsecutiveDays
 /// (per-agent hard cap on block length), double-booking (incl. cross-day overnight overlap),
 /// existing-work overlap, the weekly rest days of the schedule check (<see cref="WeeklyRestDayGuard"/>).
 /// If all candidates fail here for a slot, the slot stays unassigned
@@ -168,10 +169,13 @@ public sealed class Stage0HardConstraintChecker
                 $"Agent {agent.Id} is blocked by an absence on {date.Value:yyyy-MM-dd}.");
         }
 
-        var keywordVeto = CheckKeyword(agent.Id, date.Value, shiftTypeIndex, context.ScheduleCommands);
-        if (keywordVeto != null)
+        if (context.KeywordMode != KeywordMode.Soft)
         {
-            return keywordVeto;
+            var keywordVeto = CheckKeyword(agent.Id, date.Value, shiftTypeIndex, context.ScheduleCommands);
+            if (keywordVeto != null)
+            {
+                return keywordVeto;
+            }
         }
 
         if (IsBlacklistedShift(agent.Id, slot.Id, context.ShiftPreferences))

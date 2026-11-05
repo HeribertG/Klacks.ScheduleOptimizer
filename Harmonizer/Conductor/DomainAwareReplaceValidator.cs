@@ -1,8 +1,10 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using System.Globalization;
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Rules;
+using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
@@ -14,6 +16,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// Blacklist, MaxConsecutiveDays, MaxWeeklyHours,
 /// MinPauseHours and the weekly rest days of the schedule check (<see cref="BitmapWeeklyRestDayGuard"/>).
 /// Operates on the bitmap directly without converting to tokens.
+/// Keyword wishes: in <see cref="KeywordMode.Hard"/> FREE and the OnlyX / NoX directives veto the receiving side; in
+/// <see cref="KeywordMode.Soft"/> they do not. In both modes a move is refused when it raises a row's keyword-wish
+/// penalty (<see cref="KeywordWishCalculator"/>, read from <see cref="DayAvailability.Keywords"/>), so the harmonizer
+/// never breaks more wishes and never takes a wanted shift away from a -FREE / OnlyX day.
 /// </summary>
 /// <param name="availability">Per (agent, date) availability map, supplied by the context builder</param>
 /// <param name="boundaryAssignments">
@@ -28,6 +34,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// receives a free cell (losing a day can shorten a block and pull a worked day into a rest window). Null = no
 /// planning-rule check, identical to the behaviour before planning rules existed.
 /// </param>
+/// <param name="keywordMode">Keyword mode of the run (BitmapInput.KeywordMode); Hard by default.</param>
 public sealed class DomainAwareReplaceValidator : IReplaceValidator
 {
     /// <summary>Reason of a refused duty for an agent without shift work: {0} role label, {1} agent name, {2} symbol.</summary>
@@ -38,14 +45,17 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _ineligibleAssignments;
     private readonly BitmapWeeklyRestDayGuard _weeklyRestDays;
     private readonly PlanningRuleMoveGuard? _planningRules;
+    private readonly KeywordMode _keywordMode;
 
     public DomainAwareReplaceValidator(
         IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability>? availability,
         IReadOnlyList<BitmapAssignment>? boundaryAssignments = null,
         IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? ineligibleAssignments = null,
-        PlanningRuleMoveGuard? planningRules = null)
+        PlanningRuleMoveGuard? planningRules = null,
+        KeywordMode keywordMode = KeywordMode.Hard)
     {
         _planningRules = planningRules;
+        _keywordMode = keywordMode;
         _availability = availability ?? new Dictionary<(string, DateOnly), DayAvailability>();
         _ineligibleAssignments = ineligibleAssignments ?? new HashSet<(string, Guid, DateOnly)>();
         _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
@@ -70,7 +80,8 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             input.Availability,
             input.BoundaryAssignments,
             input.IneligibleAssignments,
-            planningRules is { HasHardRules: true } ? new PlanningRuleMoveGuard(planningRules) : null);
+            planningRules is { HasHardRules: true } ? new PlanningRuleMoveGuard(planningRules) : null,
+            input.KeywordMode);
     }
 
     /// <summary>
@@ -137,8 +148,45 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             return sideB;
         }
 
-        return null;
+        return DiagnoseKeywordWishes(bitmap, move.RowA, [(move.Day, cellB)], "rowA")
+            ?? DiagnoseKeywordWishes(bitmap, move.RowB, [(move.Day, cellA)], "rowB");
     }
+
+    /// <summary>
+    /// Null when replacing the given cells of one row does not raise the row's keyword-wish penalty, otherwise a short
+    /// reason. The penalty is judged per row over all replaced cells together, so a cross-day swap within one row may
+    /// trade a wish on one day for an equal one on the other. Public so Wizard 3's PlanMutationValidator applies the
+    /// same guard on its cross-day branch. Always null when no day carries keywords.
+    /// </summary>
+    /// <param name="bitmap">Plan before the replacement.</param>
+    /// <param name="row">The row whose cells change.</param>
+    /// <param name="replacements">Days of the row and the cells they receive.</param>
+    /// <param name="roleLabel">Label of the row in the reason (rowA / rowB).</param>
+    public string? DiagnoseKeywordWishes(
+        HarmonyBitmap bitmap, int row, IReadOnlyList<(int Day, Cell Cell)> replacements, string roleLabel)
+    {
+        ArgumentNullException.ThrowIfNull(bitmap);
+        ArgumentNullException.ThrowIfNull(replacements);
+        var agent = bitmap.Rows[row];
+        var before = 0.0;
+        var after = 0.0;
+        foreach (var (day, cell) in replacements)
+        {
+            var date = bitmap.Days[day];
+            before += KeywordPenaltyOf(agent.Id, date, bitmap.GetCell(row, day));
+            after += KeywordPenaltyOf(agent.Id, date, cell);
+        }
+
+        return after > before
+            ? $"{roleLabel} {agent.DisplayName}: move would break or leave unfulfilled more schedule-command wishes"
+            : null;
+    }
+
+    private double KeywordPenaltyOf(string agentId, DateOnly date, Cell cell)
+        => _availability.TryGetValue((agentId, date), out var availability)
+            ? KeywordWishCalculator.PenaltyOf(
+                availability.Keywords, KeywordShiftKinds.FromCellSymbol(cell.Symbol), KeywordWishWeights.Default)
+            : 0;
 
     /// <summary>
     /// End-state check of one cell as it stands in <paramref name="bitmap"/>: the same domain rules a receiving side
@@ -174,6 +222,13 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             {
                 return issue;
             }
+        }
+
+        var wishIssue = DiagnoseKeywordWishes(
+            original, row, changedDays.Select(d => (d, rebuilt.GetCell(row, d))).ToArray(), "row");
+        if (wishIssue is not null)
+        {
+            return wishIssue;
         }
 
         if (_planningRules is null || changedDays.Count == 0)
@@ -375,14 +430,14 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     {
         if (_availability.TryGetValue((agentId, date), out var availability))
         {
-            return availability.IsAvailable;
+            return _keywordMode == KeywordMode.Soft ? availability.IsAvailableIgnoringKeywords : availability.IsAvailable;
         }
         return true;
     }
 
     private string? DiagnoseKeywordRestriction(string agentId, DateOnly date, CellSymbol incomingSymbol)
     {
-        if (!_availability.TryGetValue((agentId, date), out var availability))
+        if (_keywordMode == KeywordMode.Soft || !_availability.TryGetValue((agentId, date), out var availability))
         {
             return null;
         }

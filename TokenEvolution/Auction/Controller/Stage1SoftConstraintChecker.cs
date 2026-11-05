@@ -1,13 +1,16 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 
 /// <summary>
 /// Stage 1 — Soft. Rules that should normally hold but may be relaxed if no Stage-0-clean
 /// alternative exists. Currently checks: MaxWorkDays (preferred block-length cap, e.g. "5 days
-/// then rest"), MinRestDays (gap between blocks), PreferredShift (slot is in the agent's
+/// then rest"), MinRestDays (gap between blocks), the keyword wishes in <see cref="KeywordMode.Soft"/> (a slot that
+/// breaks FREE / OnlyX / NoX is only taken when no wish-abiding bidder exists), PreferredShift (slot is in the agent's
 /// Preferred list when any preference exists). MaxConsecutiveDays is a HARD cap and lives
 /// in Stage0HardConstraintChecker.
 /// <para>
@@ -42,7 +45,32 @@ public sealed class Stage1SoftConstraintChecker
             return restVeto;
         }
 
+        var keywordVeto = CheckKeywordWish(agent, slot, date, context);
+        if (keywordVeto != null)
+        {
+            return keywordVeto;
+        }
+
         return CheckPreferredShift(agent, slot, date, context.ShiftPreferences);
+    }
+
+    private static VetoVerdict? CheckKeywordWish(CoreAgent agent, CoreShift slot, DateOnly date, CoreWizardContext context)
+    {
+        if (context.KeywordMode != KeywordMode.Soft || context.ScheduleCommands.Count == 0)
+        {
+            return null;
+        }
+
+        var shiftTypeIndex = ShiftTypeInference.FromSpanString(slot.StartTime, slot.EndTime);
+        var wishes = WizardKeywordWishes.For(context);
+        if (!wishes.BreaksRestriction(agent.Id, date, shiftTypeIndex))
+        {
+            return null;
+        }
+
+        var keyword = wishes.Days[(agent.Id, date)].Combined.ToString();
+        return new VetoVerdict(1, Stage0RuleNames.KeywordPrefix + keyword,
+            $"Slot type conflicts with the wish '{keyword}' of agent {agent.Id} on {date:yyyy-MM-dd}.");
     }
 
     private static VetoVerdict? CheckPreferredShift(

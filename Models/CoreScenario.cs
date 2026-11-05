@@ -31,6 +31,12 @@ public class CoreScenario
     /// <summary>Stage 1: GuaranteedHours coverage top-down (0..1, higher is better).</summary>
     public double FitnessStage1 { get; set; }
 
+    /// <summary>
+    /// Keyword-wish tier between Stage 1 and Stage 2: weighted broken restrictions (FREE above OnlyX above NoX) plus
+    /// unfulfilled positive wishes. Lower is better; 0 when the run has no schedule commands.
+    /// </summary>
+    public double FitnessKeywordWishes { get; set; }
+
     /// <summary>Stage 2: FullTime / MaxPossible coverage top-down (0..1).</summary>
     public double FitnessStage2 { get; set; }
 
@@ -39,4 +45,7 @@ public class CoreScenario
 
     /// <summary>Stage 4: cosmetic optimizations (fairness, MinimumHours). 0..1.</summary>
     public double FitnessStage4 { get; set; }
+
+    /// <summary>Keyword mode of the run that produced the scenario; the apply partition reads it.</summary>
+    public KeywordMode KeywordMode { get; set; } = KeywordMode.Hard;
 }

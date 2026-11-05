@@ -30,6 +30,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// Optional planning rules of the run (hard: move veto in Wizard 2/3, soft: fitness term in Wizard 3). Null or an
 /// empty rule list = no rule hook at all, which keeps every engine byte-identical to a run without planning rules.
 /// </param>
+/// <param name="KeywordMode">
+/// How the run treats the restricting schedule commands: Hard (default) vetoes them, Soft lets a move through as long as
+/// it does not raise the row's keyword-wish penalty. Positive wishes are guarded in both modes.
+/// </param>
 public sealed record BitmapInput(
     IReadOnlyList<BitmapAgent> Agents,
     DateOnly StartDate,
@@ -40,4 +44,5 @@ public sealed record BitmapInput(
     IReadOnlyList<BitmapAssignment>? BoundaryAssignments = null,
     IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? IneligibleAssignments = null,
     IReadOnlyList<CoreRestrictedTimeWindow>? RestrictedTimeWindows = null,
-    BitmapPlanningRules? Rules = null);
+    BitmapPlanningRules? Rules = null,
+    KeywordMode KeywordMode = KeywordMode.Hard);

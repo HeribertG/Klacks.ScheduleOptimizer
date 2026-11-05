@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Models;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
@@ -20,8 +21,9 @@ public static class SlotConstraintFilter
     /// <paramref name="relaxation"/> selects the rung of the coverage escalation:
     /// <see cref="SlotRelaxation.All"/> lets the MaxWorkDays block ideal step aside — the last resort
     /// of the escalation, because coverage is the highest rule of the specification and the block
-    /// ideal is not. No rung touches a hard rule: the MaxConsecutiveDays cap, collisions, bans,
-    /// keywords, the shift blacklist, breaks, hour caps, the minimum pause, the restricted windows, the package rest
+    /// ideal is not. In <see cref="KeywordMode.Soft"/> the keyword restrictions are lifted on that last rung too (they are
+    /// wishes then); in Hard mode they veto on every rung. No rung touches a hard rule: the MaxConsecutiveDays cap, collisions, bans,
+    /// the shift blacklist, breaks, hour caps, the minimum pause, the restricted windows, the package rest
     /// (MinRestDays as hours, owner ruling 2026-08-12) AND the weekly rest days of the schedule check
     /// (<see cref="WeeklyRestDayGuard"/>) veto on every rung —
     /// <see cref="SlotRelaxation.RestDaysOnly"/> is a historic no-op rung since that ruling.
@@ -39,6 +41,11 @@ public static class SlotConstraintFilter
         SlotRelaxation relaxation = SlotRelaxation.None)
     {
         if (ViolatesAbsoluteVeto(agent, date, shiftTypeIndex, shiftRefId, context, alreadyAssigned, slotStartUtc, slotEndUtc))
+        {
+            return false;
+        }
+
+        if (relaxation != SlotRelaxation.All && BreaksSoftKeyword(agent.Id, date, shiftTypeIndex, context))
         {
             return false;
         }
@@ -69,7 +76,7 @@ public static class SlotConstraintFilter
 
     /// <summary>
     /// The vetoes no coverage pressure may lift: qualification, contract day or weekday, the shift-work flag,
-    /// breaks, the day's schedule commands, the shift blacklist, the restricted time windows, a physical
+    /// breaks, the day's schedule commands (Hard keyword mode only; in Soft mode they are wishes), the shift blacklist, the restricted time windows, a physical
     /// collision and the weekly rest days of the schedule check. The forced-coverage path of the greedy seeder
     /// relaxes everything else (hour caps, block length, package rest, minimum pause) but never these: a slot
     /// it cannot fill under them stays open. Without slot times the window and collision checks are skipped.
@@ -133,7 +140,7 @@ public static class SlotConstraintFilter
         }
 
         return IsBlockedByBreak(agent.Id, date, context.BreakBlockers)
-            || !RespectsKeyword(agent.Id, date, shiftTypeIndex, context.ScheduleCommands)
+            || (context.KeywordMode != KeywordMode.Soft && !RespectsKeyword(agent.Id, date, shiftTypeIndex, context.ScheduleCommands))
             || (shiftRefId != Guid.Empty && IsBlacklistedShift(agent.Id, shiftRefId, context.ShiftPreferences));
     }
 
@@ -366,6 +373,13 @@ public static class SlotConstraintFilter
 
         return false;
     }
+
+    // Soft mode: a keyword restriction is a wish, not a veto. It still keeps every rung of the coverage escalation
+    // except the last one, so the seeder and the repair break a wish only to cover a slot nobody else can take.
+    private static bool BreaksSoftKeyword(string agentId, DateOnly date, int shiftTypeIndex, CoreWizardContext context)
+        => context.KeywordMode == KeywordMode.Soft
+            && context.ScheduleCommands.Count > 0
+            && WizardKeywordWishes.For(context).BreaksRestriction(agentId, date, shiftTypeIndex);
 
     internal static bool RespectsKeyword(
         string agentId, DateOnly date, int shiftTypeIndex, IReadOnlyList<CoreScheduleCommand> commands)

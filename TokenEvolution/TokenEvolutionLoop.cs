@@ -629,6 +629,7 @@ public sealed class TokenEvolutionLoop
             Tokens = source.Tokens.ToList(),
             FitnessStage0 = source.FitnessStage0,
             FitnessStage1 = source.FitnessStage1,
+            FitnessKeywordWishes = source.FitnessKeywordWishes,
             FitnessStage2 = source.FitnessStage2,
             FitnessStage3 = source.FitnessStage3,
             FitnessStage4 = source.FitnessStage4,

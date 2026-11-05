@@ -120,6 +120,12 @@ public sealed class PlanMutationValidator
                 return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, dayIssue);
             }
 
+            var wishIssue = DiagnoseCrossDayKeywordWishes(bitmap, swap, cellA, cellB);
+            if (wishIssue is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, wishIssue);
+            }
+
             var restDayIssue = DiagnoseCrossDayWeeklyRestDays(bitmap, swap, cellA, cellB, crossDayAgentA, crossDayAgentB);
             if (restDayIssue is not null)
             {
@@ -164,6 +170,21 @@ public sealed class PlanMutationValidator
 
         return _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowA, agentA, swap.DayA, cellB, "rowA")
             ?? _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowB, agentB, swap.DayB, cellA, "rowB");
+    }
+
+    /// <summary>
+    /// Keyword-wish guard of a cross-day swap: per receiving row, and on the combined effect when both cells belong to one
+    /// row (the same-day path checks it inside the domain validator).
+    /// </summary>
+    private string? DiagnoseCrossDayKeywordWishes(HarmonyBitmap bitmap, PlanCellSwap swap, Cell cellA, Cell cellB)
+    {
+        if (swap.RowA == swap.RowB)
+        {
+            return _domainValidator.DiagnoseKeywordWishes(bitmap, swap.RowA, [(swap.DayA, cellB), (swap.DayB, cellA)], "rowA");
+        }
+
+        return _domainValidator.DiagnoseKeywordWishes(bitmap, swap.RowA, [(swap.DayA, cellB)], "rowA")
+            ?? _domainValidator.DiagnoseKeywordWishes(bitmap, swap.RowB, [(swap.DayB, cellA)], "rowB");
     }
 
     /// <summary>

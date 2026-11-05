@@ -2,6 +2,7 @@
 
 using Klacks.ScheduleOptimizer.Common.Rotation;
 using Klacks.ScheduleOptimizer.Constraints;
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Harmonizer.Global;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
@@ -13,7 +14,7 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 
 /// <summary>
 /// Composite fitness evaluator that runs all 5 stages (Stage0 hard-violations, Stage1 guaranteed-hours lex,
-/// Stage2 full-time decay, Stage3 soft constraints, Stage4 cosmetic) and fills the corresponding
+/// then the keyword-wish tier, Stage2 full-time decay, Stage3 soft constraints, Stage4 cosmetic) and fills the corresponding
 /// properties on the scenario. Implements <see cref="IComparer{T}"/> for tournament selection in the GA loop.
 /// </summary>
 /// <param name="constraintChecker">Hard-constraint checker supplying Stage-0</param>
@@ -60,6 +61,12 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// <summary>Stage-3 package-compactness weight (rule 6).</summary>
     public double Stage3PackageLengthWeight { get; init; } = 0.4;
 
+    /// <summary>Tier weights of the keyword-wish tier (between Stage 1 and Stage 2).</summary>
+    public KeywordWishWeights KeywordWishWeights { get; init; } = KeywordWishWeights.Default;
+
+    /// <summary>Share of the legacy aggregate <see cref="CoreScenario.Fitness"/> the keyword-wish tier can take away.</summary>
+    private const double LegacyKeywordWishWeight = 0.1;
+
     public TokenFitnessEvaluator(
         TokenConstraintChecker constraintChecker,
         IReadOnlyDictionary<string, double> maxPossiblePerAgent,
@@ -92,6 +99,11 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Stage3CarryInWeight = cfg.FitnessStage3CarryIn,
             Stage3PackageLengthWeight = cfg.FitnessStage3PackageLength,
             Stage3LevelShortfallWeight = cfg.FitnessStage3LevelShortfall,
+            KeywordWishWeights = new KeywordWishWeights(
+                cfg.FitnessKeywordWishFree,
+                cfg.FitnessKeywordWishOnly,
+                cfg.FitnessKeywordWishNo,
+                cfg.FitnessKeywordWishUnfulfilled),
         };
     }
 
@@ -102,12 +114,16 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         scenario.FitnessStage0 = total;
         var (stage1Flags, stage1Completion) = ComputeStage1(scenario, context);
         scenario.FitnessStage1 = stage1Completion;
+        scenario.FitnessKeywordWishes = ComputeKeywordWishes(scenario, context);
         scenario.FitnessStage2 = ComputeStage2(scenario, context);
         scenario.FitnessStage3 = ComputeStage3(scenario, context);
         scenario.FitnessStage4 = ComputeStage4(scenario, context);
 
-        // Back-compat aggregate fitness used by legacy code paths.
+        // Back-compat aggregate fitness used by legacy code paths. The keyword-wish penalty is squashed to [0, 1)
+        // and placed between Stage 1 and Stage 2, so a run without schedule commands keeps its former value.
+        var wishes = scenario.FitnessKeywordWishes;
         scenario.Fitness = scenario.FitnessStage1
+            - (LegacyKeywordWishWeight * wishes / (1 + wishes))
             + (scenario.FitnessStage2 * 0.1)
             + (scenario.FitnessStage3 * 0.01)
             + (scenario.FitnessStage4 * 0.001);
@@ -187,6 +203,12 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             return stage1;
         }
 
+        var keywordWishes = x.FitnessKeywordWishes.CompareTo(y.FitnessKeywordWishes);
+        if (keywordWishes != 0)
+        {
+            return keywordWishes;
+        }
+
         var stage2 = y.FitnessStage2.CompareTo(x.FitnessStage2);
         if (stage2 != 0)
         {
@@ -200,6 +222,21 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         }
 
         return y.FitnessStage4.CompareTo(x.FitnessStage4);
+    }
+
+    /// <summary>
+    /// Keyword-wish tier: weighted broken restrictions plus unfulfilled positive wishes of the plan
+    /// (<see cref="WizardKeywordWishes"/>). In Hard mode the restrictions cannot break, so only the attraction of
+    /// -FREE and OnlyX acts; in Soft mode both act. Ranked after Stage 1 and before Stage 2, below legality and coverage.
+    /// </summary>
+    private double ComputeKeywordWishes(CoreScenario scenario, CoreWizardContext context)
+    {
+        if (context.ScheduleCommands.Count == 0)
+        {
+            return 0;
+        }
+
+        return WizardKeywordWishes.For(context).Evaluate(scenario.Tokens, collectItems: false).Tally.Penalty(KeywordWishWeights);
     }
 
     private (IReadOnlyList<int> Flags, double CompletionRate) ComputeStage1(CoreScenario scenario, CoreWizardContext context)
