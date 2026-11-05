@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.Constraints;
 
@@ -99,8 +100,7 @@ public sealed class PlanConstraintChecker
         foreach (var a in assignments)
         {
             if (eval.AgentsById.TryGetValue(a.AgentId, out var agent)
-                && !agent.PerformsShiftWork
-                && a.ShiftTypeIndex != 0)
+                && !ShiftWorkRule.Permits(agent.PerformsShiftWork, a.ShiftTypeIndex))
             {
                 violations.Add(new ConstraintViolation(
                     ViolationKind.PerformsShiftWorkViolation,

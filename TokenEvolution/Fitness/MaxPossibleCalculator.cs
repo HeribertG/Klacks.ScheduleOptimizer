@@ -61,7 +61,7 @@ public sealed class MaxPossibleCalculator
 
         var shiftTypeIndex = ShiftTypeInference.FromSpanString(shift.StartTime, shift.EndTime);
 
-        if (!agent.PerformsShiftWork && shiftTypeIndex != 0)
+        if (!ShiftWorkRule.Permits(agent.PerformsShiftWork, shiftTypeIndex))
         {
             return false;
         }

@@ -3,13 +3,15 @@
 using System.Globalization;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Rules;
+using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 
 /// <summary>
 /// Hybrid validator that combines bitmap-local checks (locks, indices, self-swap) with
 /// hard domain constraints lifted from Wizard 1: contract WorksOnDay, FREE-Keyword,
-/// BreakBlocker, ClientShiftPreference Blacklist, MaxConsecutiveDays, MaxWeeklyHours,
+/// BreakBlocker, the shift-work flag (<see cref="ShiftWorkRule"/>, receiving side only), ClientShiftPreference
+/// Blacklist, MaxConsecutiveDays, MaxWeeklyHours,
 /// MinPauseHours and the weekly rest days of the schedule check (<see cref="BitmapWeeklyRestDayGuard"/>).
 /// Operates on the bitmap directly without converting to tokens.
 /// </summary>
@@ -28,6 +30,9 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// </param>
 public sealed class DomainAwareReplaceValidator : IReplaceValidator
 {
+    /// <summary>Reason of a refused duty for an agent without shift work: {0} role label, {1} agent name, {2} symbol.</summary>
+    public const string NoShiftWorkReasonFormat = "{0} {1} does not perform shift work; only early duties allowed ({2})";
+
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
     private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
     private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _ineligibleAssignments;
@@ -291,7 +296,8 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
 
     /// <summary>
     /// Returns null if the agent may receive the incoming cell on the date under the day's availability (contract
-    /// day, FREE command, break), its schedule-command directive (OnlyX / NoX) and the agent's shift blacklist,
+    /// day, FREE command, break), its schedule-command directive (OnlyX / NoX), the agent's shift-work flag
+    /// (<see cref="ShiftWorkRule"/>: without shift work only early cells) and the agent's shift blacklist,
     /// otherwise a short reason. A free incoming cell is always allowed. Public so Wizard 3's PlanMutationValidator
     /// applies the same check on its cross-day branch, which never reaches <see cref="Diagnose"/>.
     /// </summary>
@@ -315,6 +321,11 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         if (keywordIssue is not null)
         {
             return $"{roleLabel} {agent.DisplayName}: {keywordIssue}";
+        }
+
+        if (!ShiftWorkRule.Permits(agent.PerformsShiftWork, incomingCell.Symbol))
+        {
+            return string.Format(CultureInfo.InvariantCulture, NoShiftWorkReasonFormat, roleLabel, agent.DisplayName, incomingCell.Symbol);
         }
 
         if (incomingCell.ShiftRefId is Guid shiftId

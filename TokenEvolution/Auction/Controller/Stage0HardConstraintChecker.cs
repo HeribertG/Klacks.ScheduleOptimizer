@@ -156,7 +156,7 @@ public sealed class Stage0HardConstraintChecker
                 $"Agent {agent.Id} is not contracted to work on {date.Value.DayOfWeek}.");
         }
 
-        if (!agent.PerformsShiftWork && shiftTypeIndex != 0)
+        if (!ShiftWorkRule.Permits(agent.PerformsShiftWork, shiftTypeIndex))
         {
             return new VetoVerdict(0, Stage0RuleNames.PerformsShiftWork,
                 $"Agent {agent.Id} does not participate in shift rotation; only early-shift permitted.");

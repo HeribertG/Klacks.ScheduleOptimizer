@@ -127,7 +127,7 @@ public static class SlotConstraintFilter
             return true;
         }
 
-        if (!agent.PerformsShiftWork && shiftTypeIndex != ShiftTypeInference.EarlyIndex)
+        if (!ShiftWorkRule.Permits(agent.PerformsShiftWork, shiftTypeIndex))
         {
             return true;
         }

@@ -15,6 +15,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// <param name="MinRestDays">Minimum rest days per calendar week, rounded up; 0 = unconstrained</param>
 /// <param name="NightWindow">Effective contractual night window for planning rules; null = fall back to the Night symbol</param>
 /// <param name="WorkloadPercent">Employment level in percent for pro-rata planning rules; null = full time</param>
+/// <param name="PerformsShiftWork">Shift-work flag of the contract or the settings defaults; false = the agent may only receive early duties</param>
 public sealed record BitmapAgent(
     string Id,
     string DisplayName,
@@ -26,4 +27,5 @@ public sealed record BitmapAgent(
     IReadOnlySet<Guid>? BlacklistedShiftIds = null,
     int MinRestDays = 0,
     CoreNightWindow? NightWindow = null,
-    decimal? WorkloadPercent = null);
+    decimal? WorkloadPercent = null,
+    bool PerformsShiftWork = true);
