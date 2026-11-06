@@ -17,9 +17,11 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// MinPauseHours and the weekly rest days of the schedule check (<see cref="BitmapWeeklyRestDayGuard"/>).
 /// Operates on the bitmap directly without converting to tokens.
 /// Keyword wishes: in <see cref="KeywordMode.Hard"/> FREE and the OnlyX / NoX directives veto the receiving side; in
-/// <see cref="KeywordMode.Soft"/> they do not. In both modes a move is refused when it raises a row's keyword-wish
-/// penalty (<see cref="KeywordWishCalculator"/>, read from <see cref="DayAvailability.Keywords"/>), so the harmonizer
-/// never breaks more wishes and never takes a wanted shift away from a -FREE / OnlyX day.
+/// <see cref="KeywordMode.Soft"/> they do not. In both modes a move is refused when it raises any keyword-wish tier of a
+/// row (broken FREE, OnlyX, NoX or unfulfilled positive wishes; <see cref="KeywordWishCalculator"/>, read from
+/// <see cref="DayAvailability.Keywords"/>), so the harmonizer never breaks a wish and never takes a wanted shift away from
+/// a -FREE / OnlyX day. "No tier may rise" is deliberately stricter than "not lexicographically worse": the harmonizer has
+/// no coverage mandate, so it must not trade one wish of an employee for another one.
 /// </summary>
 /// <param name="availability">Per (agent, date) availability map, supplied by the context builder</param>
 /// <param name="boundaryAssignments">
@@ -153,9 +155,9 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     }
 
     /// <summary>
-    /// Null when replacing the given cells of one row does not raise the row's keyword-wish penalty, otherwise a short
-    /// reason. The penalty is judged per row over all replaced cells together, so a cross-day swap within one row may
-    /// trade a wish on one day for an equal one on the other. Public so Wizard 3's PlanMutationValidator applies the
+    /// Null when replacing the given cells of one row raises none of the row's keyword-wish tiers, otherwise a short
+    /// reason. The tiers are counted per row over all replaced cells together, so a cross-day swap within one row may
+    /// move a wish of one tier from one day to another, but never trade it for a wish of another tier. Public so Wizard 3's PlanMutationValidator applies the
     /// same guard on its cross-day branch. Always null when no day carries keywords.
     /// </summary>
     /// <param name="bitmap">Plan before the replacement.</param>
@@ -168,25 +170,24 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         ArgumentNullException.ThrowIfNull(bitmap);
         ArgumentNullException.ThrowIfNull(replacements);
         var agent = bitmap.Rows[row];
-        var before = 0.0;
-        var after = 0.0;
+        var before = default(KeywordWishTally);
+        var after = default(KeywordWishTally);
         foreach (var (day, cell) in replacements)
         {
             var date = bitmap.Days[day];
-            before += KeywordPenaltyOf(agent.Id, date, bitmap.GetCell(row, day));
-            after += KeywordPenaltyOf(agent.Id, date, cell);
+            before = before.Add(KeywordVerdictOf(agent.Id, date, bitmap.GetCell(row, day)));
+            after = after.Add(KeywordVerdictOf(agent.Id, date, cell));
         }
 
-        return after > before
+        return after.RisesInAnyTierAbove(before)
             ? $"{roleLabel} {agent.DisplayName}: move would break or leave unfulfilled more schedule-command wishes"
             : null;
     }
 
-    private double KeywordPenaltyOf(string agentId, DateOnly date, Cell cell)
+    private KeywordDayVerdict KeywordVerdictOf(string agentId, DateOnly date, Cell cell)
         => _availability.TryGetValue((agentId, date), out var availability)
-            ? KeywordWishCalculator.PenaltyOf(
-                availability.Keywords, KeywordShiftKinds.FromCellSymbol(cell.Symbol), KeywordWishWeights.Default)
-            : 0;
+            ? KeywordWishCalculator.VerdictOf(availability.Keywords, KeywordShiftKinds.FromCellSymbol(cell.Symbol))
+            : KeywordDayVerdict.Clean;
 
     /// <summary>
     /// End-state check of one cell as it stands in <paramref name="bitmap"/>: the same domain rules a receiving side

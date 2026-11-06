@@ -14,8 +14,12 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 
 /// <summary>
 /// Composite fitness evaluator that runs all 5 stages (Stage0 hard-violations, Stage1 guaranteed-hours lex,
-/// then the keyword-wish tier, Stage2 full-time decay, Stage3 soft constraints, Stage4 cosmetic) and fills the corresponding
+/// the keyword-wish tiers, Stage2 full-time decay, Stage3 soft constraints, Stage4 cosmetic) and fills the corresponding
 /// properties on the scenario. Implements <see cref="IComparer{T}"/> for tournament selection in the GA loop.
+/// The keyword-wish tiers are counts compared lexicographically (FREE, then OnlyX, then NoX). In
+/// <see cref="Models.KeywordMode.Soft"/> they rank right after coverage and before Stage 1, so a wish is broken only to
+/// cover a slot, never for guaranteed or target hours; in Hard mode (where a broken restriction already counts as a
+/// legality violation) they rank after Stage 1. Unfulfilled positive wishes rank after Stage 1 and before Stage 2 in both.
 /// </summary>
 /// <param name="constraintChecker">Hard-constraint checker supplying Stage-0</param>
 public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
@@ -61,10 +65,10 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// <summary>Stage-3 package-compactness weight (rule 6).</summary>
     public double Stage3PackageLengthWeight { get; init; } = 0.4;
 
-    /// <summary>Tier weights of the keyword-wish tier (between Stage 1 and Stage 2).</summary>
-    public KeywordWishWeights KeywordWishWeights { get; init; } = KeywordWishWeights.Default;
+    /// <summary>Keyword mode of the run; decides where the broken keyword-wish tiers rank in <see cref="Compare"/>.</summary>
+    public KeywordMode KeywordMode { get; init; } = KeywordMode.Hard;
 
-    /// <summary>Share of the legacy aggregate <see cref="CoreScenario.Fitness"/> the keyword-wish tier can take away.</summary>
+    /// <summary>Share of the legacy aggregate <see cref="CoreScenario.Fitness"/> the keyword-wish count can take away.</summary>
     private const double LegacyKeywordWishWeight = 0.1;
 
     public TokenFitnessEvaluator(
@@ -99,11 +103,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             Stage3CarryInWeight = cfg.FitnessStage3CarryIn,
             Stage3PackageLengthWeight = cfg.FitnessStage3PackageLength,
             Stage3LevelShortfallWeight = cfg.FitnessStage3LevelShortfall,
-            KeywordWishWeights = new KeywordWishWeights(
-                cfg.FitnessKeywordWishFree,
-                cfg.FitnessKeywordWishOnly,
-                cfg.FitnessKeywordWishNo,
-                cfg.FitnessKeywordWishUnfulfilled),
+            KeywordMode = context.KeywordMode,
         };
     }
 
@@ -119,9 +119,9 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         scenario.FitnessStage3 = ComputeStage3(scenario, context);
         scenario.FitnessStage4 = ComputeStage4(scenario, context);
 
-        // Back-compat aggregate fitness used by legacy code paths. The keyword-wish penalty is squashed to [0, 1)
-        // and placed between Stage 1 and Stage 2, so a run without schedule commands keeps its former value.
-        var wishes = scenario.FitnessKeywordWishes;
+        // Back-compat aggregate fitness for telemetry only (selection uses Compare). The missed-wish count is squashed
+        // to [0, 1), so a run without schedule commands keeps its former value.
+        double wishes = scenario.FitnessKeywordWishes.Broken + scenario.FitnessKeywordWishes.Unfulfilled;
         scenario.Fitness = scenario.FitnessStage1
             - (LegacyKeywordWishWeight * wishes / (1 + wishes))
             + (scenario.FitnessStage2 * 0.1)
@@ -197,16 +197,28 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             return stage0;
         }
 
+        var softMode = KeywordMode == KeywordMode.Soft;
+        var broken = x.FitnessKeywordWishes.CompareBrokenTo(y.FitnessKeywordWishes);
+        if (softMode && broken != 0)
+        {
+            return broken;
+        }
+
         var stage1 = y.FitnessStage1.CompareTo(x.FitnessStage1);
         if (stage1 != 0)
         {
             return stage1;
         }
 
-        var keywordWishes = x.FitnessKeywordWishes.CompareTo(y.FitnessKeywordWishes);
-        if (keywordWishes != 0)
+        if (!softMode && broken != 0)
         {
-            return keywordWishes;
+            return broken;
+        }
+
+        var unfulfilled = x.FitnessKeywordWishes.Unfulfilled.CompareTo(y.FitnessKeywordWishes.Unfulfilled);
+        if (unfulfilled != 0)
+        {
+            return unfulfilled;
         }
 
         var stage2 = y.FitnessStage2.CompareTo(x.FitnessStage2);
@@ -225,18 +237,18 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     }
 
     /// <summary>
-    /// Keyword-wish tier: weighted broken restrictions plus unfulfilled positive wishes of the plan
-    /// (<see cref="WizardKeywordWishes"/>). In Hard mode the restrictions cannot break, so only the attraction of
-    /// -FREE and OnlyX acts; in Soft mode both act. Ranked after Stage 1 and before Stage 2, below legality and coverage.
+    /// Keyword-wish counts of the plan (<see cref="WizardKeywordWishes"/>): broken restrictions per tier and unfulfilled
+    /// positive wishes. In Hard mode the restrictions cannot break (only a locked work can), so only the attraction of
+    /// -FREE and OnlyX acts; in Soft mode both act.
     /// </summary>
-    private double ComputeKeywordWishes(CoreScenario scenario, CoreWizardContext context)
+    private static KeywordWishTally ComputeKeywordWishes(CoreScenario scenario, CoreWizardContext context)
     {
         if (context.ScheduleCommands.Count == 0)
         {
-            return 0;
+            return default;
         }
 
-        return WizardKeywordWishes.For(context).Evaluate(scenario.Tokens, collectItems: false).Tally.Penalty(KeywordWishWeights);
+        return WizardKeywordWishes.For(context).Evaluate(scenario.Tokens, collectItems: false).Tally;
     }
 
     private (IReadOnlyList<int> Flags, double CompletionRate) ComputeStage1(CoreScenario scenario, CoreWizardContext context)

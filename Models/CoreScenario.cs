@@ -1,5 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
+
 /// <summary>
 /// A complete scheduling solution (token-based genome).
 /// Fitness is broken down into 5 lexicographically ordered stages.
@@ -32,10 +34,12 @@ public class CoreScenario
     public double FitnessStage1 { get; set; }
 
     /// <summary>
-    /// Keyword-wish tier between Stage 1 and Stage 2: weighted broken restrictions (FREE above OnlyX above NoX) plus
-    /// unfulfilled positive wishes. Lower is better; 0 when the run has no schedule commands.
+    /// Keyword-wish tiers as counts: broken restrictions (FREE, OnlyX, NoX, compared lexicographically) and unfulfilled
+    /// positive wishes. In Soft keyword mode the broken tiers rank right after coverage and before Stage 1, in Hard mode
+    /// after Stage 1; the unfulfilled wishes rank after Stage 1 and before Stage 2 in both modes. Empty without schedule
+    /// commands.
     /// </summary>
-    public double FitnessKeywordWishes { get; set; }
+    public KeywordWishTally FitnessKeywordWishes { get; set; }
 
     /// <summary>Stage 2: FullTime / MaxPossible coverage top-down (0..1).</summary>
     public double FitnessStage2 { get; set; }

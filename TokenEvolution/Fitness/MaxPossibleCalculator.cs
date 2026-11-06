@@ -7,8 +7,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 
 /// <summary>
 /// Computes the maximum possible hours each agent could realistically cover in the period,
-/// respecting weekday flags, shift-work flag, break blockers, per-day keywords (Hard keyword mode only; in Soft mode a
-/// keyword day stays plannable) and MaximumHours cap.
+/// respecting weekday flags, shift-work flag, break blockers, per-day keywords and MaximumHours cap. The keywords close
+/// their days in both keyword modes: Soft mode breaks a wish only to cover an otherwise open slot, never for hours, so
+/// hours behind a wish are not reachable for the Stage-1/Stage-2 targets.
 /// Result is constant for a GA run and used to normalise Stage-1/Stage-2 fitness.
 /// </summary>
 public sealed class MaxPossibleCalculator
@@ -75,11 +76,6 @@ public sealed class MaxPossibleCalculator
             {
                 return false;
             }
-        }
-
-        if (context.KeywordMode == KeywordMode.Soft)
-        {
-            return true;
         }
 
         foreach (var cmd in context.ScheduleCommands)

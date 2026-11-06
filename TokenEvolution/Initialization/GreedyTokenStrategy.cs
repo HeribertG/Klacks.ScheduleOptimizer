@@ -1,5 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 
@@ -14,7 +15,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 /// Phase 2 enforces coverage: any leftover slot is assigned to the least-loaded agent (constraint-valid
 /// first, falling back to a forced assignment that relaxes hour caps, block length, package rest and minimum
 /// pause but never an absolute veto, see SlotConstraintFilter.ViolatesAbsoluteVeto; a slot no agent may take
-/// under those vetoes stays open).
+/// under those vetoes stays open). In Soft keyword mode the forced pick prefers the agent breaking the least severe keyword
+/// wish (none, NoX, OnlyX, FREE) and only then the least loaded one, so a wish never breaks for hours.
 /// Slots already staffed by a locked work or by the carry-in pre-pass never enter either phase.
 /// </summary>
 public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
@@ -195,6 +197,7 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
     {
         CoreAgent? best = null;
         double bestLoad = double.PositiveInfinity;
+        var bestSeverity = int.MaxValue;
 
         foreach (var agent in agents)
         {
@@ -208,10 +211,14 @@ public sealed class GreedyTokenStrategy : ITokenPopulationStrategy
                 continue;
             }
 
+            var severity = requireValid
+                ? KeywordWishSeverity.NoneBroken
+                : KeywordWishCandidates.SeverityOf(context, agent.Id, slotDate, shiftTypeIndex);
             var assigned = hoursAssigned.TryGetValue(agent.Id, out var h) ? h : 0;
             var load = agent.CurrentHours + assigned;
-            if (load < bestLoad)
+            if (severity < bestSeverity || (severity == bestSeverity && load < bestLoad))
             {
+                bestSeverity = severity;
                 bestLoad = load;
                 best = agent;
             }

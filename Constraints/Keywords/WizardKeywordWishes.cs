@@ -44,6 +44,13 @@ public sealed class WizardKeywordWishes
         => Days.TryGetValue((agentId, date), out var day)
             && !day.Allows(KeywordShiftKinds.FromShiftTypeIndex(shiftTypeIndex));
 
+    /// <summary>Tier of the restriction a shift of the kind on the day breaks; null when it breaks none.</summary>
+    /// <param name="agentId">The employee.</param>
+    /// <param name="date">Start day of the shift.</param>
+    /// <param name="shiftTypeIndex">Kind of the shift (ShiftTypeInference).</param>
+    public KeywordWishOutcome? BrokenRestriction(string agentId, DateOnly date, int shiftTypeIndex)
+        => BreaksRestriction(agentId, date, shiftTypeIndex) ? Days[(agentId, date)].RestrictionOutcome : null;
+
     /// <summary>Missed wishes of a token plan; locked tokens count, they are part of the plan.</summary>
     /// <param name="tokens">All tokens of the plan.</param>
     /// <param name="collectItems">True to list the single missed wishes.</param>

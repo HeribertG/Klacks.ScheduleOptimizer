@@ -32,7 +32,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// </param>
 /// <param name="KeywordMode">
 /// How the run treats the restricting schedule commands: Hard (default) vetoes them, Soft lets a move through as long as
-/// it does not raise the row's keyword-wish penalty. Positive wishes are guarded in both modes.
+/// it raises no keyword-wish tier of the row. Positive wishes are guarded in both modes.
 /// </param>
 public sealed record BitmapInput(
     IReadOnlyList<BitmapAgent> Agents,

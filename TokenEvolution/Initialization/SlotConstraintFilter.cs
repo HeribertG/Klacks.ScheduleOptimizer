@@ -19,10 +19,10 @@ public static class SlotConstraintFilter
     /// per-agent MinPauseHours (incl. cross-day overnight gaps), block-length and rest-day rules.
     /// The optional slot interval enables the MinPauseHours check; pass null for keyword-only seeds.
     /// <paramref name="relaxation"/> selects the rung of the coverage escalation:
-    /// <see cref="SlotRelaxation.All"/> lets the MaxWorkDays block ideal step aside — the last resort
-    /// of the escalation, because coverage is the highest rule of the specification and the block
-    /// ideal is not. In <see cref="KeywordMode.Soft"/> the keyword restrictions are lifted on that last rung too (they are
-    /// wishes then); in Hard mode they veto on every rung. No rung touches a hard rule: the MaxConsecutiveDays cap, collisions, bans,
+    /// <see cref="SlotRelaxation.All"/> lets the MaxWorkDays block ideal step aside, because coverage is the highest
+    /// rule of the specification and the block ideal is not. In <see cref="KeywordMode.Soft"/> the keyword restrictions
+    /// are lifted only on the rung after it, <see cref="SlotRelaxation.KeywordWishes"/> (they are wishes then, broken for
+    /// coverage only); in Hard mode they veto on every rung. No rung touches a hard rule: the MaxConsecutiveDays cap, collisions, bans,
     /// the shift blacklist, breaks, hour caps, the minimum pause, the restricted windows, the package rest
     /// (MinRestDays as hours, owner ruling 2026-08-12) AND the weekly rest days of the schedule check
     /// (<see cref="WeeklyRestDayGuard"/>) veto on every rung —
@@ -45,7 +45,7 @@ public static class SlotConstraintFilter
             return false;
         }
 
-        if (relaxation != SlotRelaxation.All && BreaksSoftKeyword(agent.Id, date, shiftTypeIndex, context))
+        if (relaxation < SlotRelaxation.KeywordWishes && BreaksSoftKeyword(agent.Id, date, shiftTypeIndex, context))
         {
             return false;
         }
@@ -60,7 +60,7 @@ public static class SlotConstraintFilter
             return false;
         }
 
-        if (SlotPackageRules.ExceedsBlockLength(agent, date, context, alreadyAssigned, relaxation != SlotRelaxation.All))
+        if (SlotPackageRules.ExceedsBlockLength(agent, date, context, alreadyAssigned, relaxation < SlotRelaxation.All))
         {
             return false;
         }
@@ -374,8 +374,8 @@ public static class SlotConstraintFilter
         return false;
     }
 
-    // Soft mode: a keyword restriction is a wish, not a veto. It still keeps every rung of the coverage escalation
-    // except the last one, so the seeder and the repair break a wish only to cover a slot nobody else can take.
+    // Soft mode: a keyword restriction is a wish, not a veto. It still holds on every rung of the coverage escalation
+    // below KeywordWishes, so the seeder and the repair break a wish only to cover a slot nobody else can take.
     private static bool BreaksSoftKeyword(string agentId, DateOnly date, int shiftTypeIndex, CoreWizardContext context)
         => context.KeywordMode == KeywordMode.Soft
             && context.ScheduleCommands.Count > 0

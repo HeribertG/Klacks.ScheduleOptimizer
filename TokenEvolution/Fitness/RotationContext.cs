@@ -12,7 +12,7 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 /// period (boundary locked works and existing work blockers), so a block change across the seam is judged against
 /// the carry-in block (SPEC-ROTATION-2026-10-08 rule 6). Second, the answer to "may the agent work this kind on this day": a kind is closed
 /// on a day for a plan-independent hard reason only (SPEC-ROTATION-2026-10-08 rule 5) — no shift work (only early stays
-/// open, as the engine's veto has it; owner question G1 is open), a day directive (Hard keyword mode only), or every slot of the kind on that
+/// open, as the engine's veto has it; owner question G1 is open), a day directive (in both keyword modes: a Soft wish breaks only for coverage), or every slot of the kind on that
 /// day being ineligible or blacklisted for the agent. A day without a slot of the kind is "no demand", not closed.
 /// Known gap: <see cref="CoreWizardContext.IneligibleAssignments"/> also carries availability ineligibility, which the
 /// spec does not list as a reason; expired qualifications only count while their blocking setting is on.
@@ -122,8 +122,7 @@ public sealed class RotationContext
             return true;
         }
 
-        if (_context.KeywordMode != KeywordMode.Soft
-            && _commands.TryGetValue((agentId, date), out var commands)
+        if (_commands.TryGetValue((agentId, date), out var commands)
             && !SlotConstraintFilter.RespectsKeyword(agentId, date, kindIndex, commands))
         {
             return true;

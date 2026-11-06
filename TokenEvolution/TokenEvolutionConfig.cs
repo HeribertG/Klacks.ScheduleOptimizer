@@ -12,18 +12,6 @@ public sealed record TokenEvolutionConfig
 {
     private const double DefaultInitWarmStartRatio = 0.2;
 
-    /// <summary>Penalty of a worked day the employee marked FREE (also a combination that leaves no shift kind).</summary>
-    public const double DefaultKeywordWishFreeWeight = 100;
-
-    /// <summary>Penalty of a worked day of another kind than the employee's EARLY / LATE / NIGHT.</summary>
-    public const double DefaultKeywordWishOnlyWeight = 10;
-
-    /// <summary>Penalty of a worked day of a kind the employee excluded with -EARLY / -LATE / -NIGHT.</summary>
-    public const double DefaultKeywordWishNoWeight = 3;
-
-    /// <summary>Penalty of an unfulfilled positive wish (-FREE without a shift, EARLY / LATE / NIGHT without a shift of that kind).</summary>
-    public const double DefaultKeywordWishUnfulfilledWeight = 1;
-
     public int PopulationSize { get; init; } = 50;
 
     public int MaxGenerations { get; init; } = 200;
@@ -113,18 +101,6 @@ public sealed record TokenEvolutionConfig
 
     /// <summary>Stage-3 weight for package compactness (rule 6): the share of calendar packages longer than the short-package bound. Guards the compact auction seeds against splintering by swap and crossover offspring. Doubling to 0.8 was measured on 2026-08-13 and REJECTED: it bought only scenario-2 polish, erased the whole scenario-1b sequence win (0.14 back to 0.27) and pushed fairness/attribution edges out of the selection (Sz3 spread and A24 rips) — the stage-3 balance tips before the compactness defence pays.</summary>
     public double FitnessStage3PackageLength { get; init; } = 0.4;
-
-    /// <summary>Keyword-wish tier weight of a broken FREE (fitness tier between Stage 1 and Stage 2).</summary>
-    public double FitnessKeywordWishFree { get; init; } = DefaultKeywordWishFreeWeight;
-
-    /// <summary>Keyword-wish tier weight of a broken EARLY / LATE / NIGHT.</summary>
-    public double FitnessKeywordWishOnly { get; init; } = DefaultKeywordWishOnlyWeight;
-
-    /// <summary>Keyword-wish tier weight of a broken -EARLY / -LATE / -NIGHT.</summary>
-    public double FitnessKeywordWishNo { get; init; } = DefaultKeywordWishNoWeight;
-
-    /// <summary>Keyword-wish tier weight of an unfulfilled positive wish (-FREE, EARLY / LATE / NIGHT).</summary>
-    public double FitnessKeywordWishUnfulfilled { get; init; } = DefaultKeywordWishUnfulfilledWeight;
 
     /// <summary>Optional soft wall-clock budget. When exceeded the loop stops at the next generation boundary and returns the best solution found so far. Null = no time limit.</summary>
     public TimeSpan? MaxRuntime { get; init; }

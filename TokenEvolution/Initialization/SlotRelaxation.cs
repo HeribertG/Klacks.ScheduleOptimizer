@@ -23,6 +23,13 @@ public enum SlotRelaxation
     /// </summary>
     RestDaysOnly = 1,
 
-    /// <summary>Last resort: the MaxWorkDays block ideal steps aside, hard rules and rest do not.</summary>
+    /// <summary>The MaxWorkDays block ideal steps aside, hard rules and rest do not.</summary>
     All = 2,
+
+    /// <summary>
+    /// Last resort of <see cref="Models.KeywordMode.Soft"/> only: what <see cref="All"/> admits plus a placement that breaks
+    /// a keyword wish (FREE, OnlyX, NoX). Climbed only when no wish-abiding fill exists, so a wish breaks for coverage only;
+    /// the caller then keeps the candidates breaking the least severe wish. In Hard mode the keywords veto here too.
+    /// </summary>
+    KeywordWishes = 3,
 }

@@ -24,12 +24,11 @@ public static class KeywordWishCalculator
         return new KeywordDayVerdict(broken, unfulfilled);
     }
 
-    /// <summary>Weighted penalty of one (agent, day); 0 without a keyword day.</summary>
+    /// <summary>Verdict of one (agent, day); clean without a keyword day.</summary>
     /// <param name="day">The day's keyword rules, null when the day has none.</param>
     /// <param name="workedKinds">Kinds worked that day.</param>
-    /// <param name="weights">Tier weights.</param>
-    public static double PenaltyOf(KeywordDay? day, int workedKinds, KeywordWishWeights weights)
-        => day is null ? 0 : weights.Of(EvaluateDay(day, workedKinds));
+    public static KeywordDayVerdict VerdictOf(KeywordDay? day, int workedKinds)
+        => day is null ? KeywordDayVerdict.Clean : EvaluateDay(day, workedKinds);
 
     /// <summary>Sums the plan over every keyword day.</summary>
     /// <param name="days">Keyword days of the plan per (agent, day).</param>

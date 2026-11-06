@@ -3,7 +3,10 @@
 namespace Klacks.ScheduleOptimizer.Constraints.Keywords;
 
 /// <summary>
-/// Counts of missed wishes of a plan, per tier, plus the unfulfilled positive wishes.
+/// Counts of missed wishes of a plan, per tier, plus the unfulfilled positive wishes. The tiers are strict: one broken
+/// FREE outweighs any number of broken OnlyX, one broken OnlyX any number of broken NoX, so tallies are compared
+/// lexicographically on the counts (<see cref="CompareBrokenTo"/>), never through a weighted sum. The unfulfilled positive
+/// wishes are a separate, lowest tier that the callers rank on their own.
 /// </summary>
 /// <param name="BrokenFree">Worked days marked FREE.</param>
 /// <param name="BrokenOnly">Worked days against an EARLY / LATE / NIGHT.</param>
@@ -21,8 +24,28 @@ public readonly record struct KeywordWishTally(int BrokenFree, int BrokenOnly, i
         BrokenNo + (verdict.Broken == KeywordWishOutcome.BrokenNo ? 1 : 0),
         Unfulfilled + (verdict.Unfulfilled ? 1 : 0));
 
-    /// <summary>Weighted penalty of the tally (lower is better).</summary>
-    /// <param name="weights">Tier weights.</param>
-    public double Penalty(KeywordWishWeights weights)
-        => (BrokenFree * weights.Free) + (BrokenOnly * weights.Only) + (BrokenNo * weights.No) + (Unfulfilled * weights.Unfulfilled);
+    /// <summary>
+    /// Lexicographic comparison of the broken restrictions (FREE, then OnlyX, then NoX); negative when this tally breaks
+    /// less. The unfulfilled positive wishes are not part of it.
+    /// </summary>
+    /// <param name="other">The tally to compare with.</param>
+    public int CompareBrokenTo(KeywordWishTally other)
+    {
+        var free = BrokenFree.CompareTo(other.BrokenFree);
+        if (free != 0)
+        {
+            return free;
+        }
+
+        var only = BrokenOnly.CompareTo(other.BrokenOnly);
+        return only != 0 ? only : BrokenNo.CompareTo(other.BrokenNo);
+    }
+
+    /// <summary>True when any single tier (the three broken tiers or the unfulfilled wishes) counts more than in the other tally.</summary>
+    /// <param name="other">The tally to compare with, typically the state before a move.</param>
+    public bool RisesInAnyTierAbove(KeywordWishTally other)
+        => BrokenFree > other.BrokenFree
+            || BrokenOnly > other.BrokenOnly
+            || BrokenNo > other.BrokenNo
+            || Unfulfilled > other.Unfulfilled;
 }

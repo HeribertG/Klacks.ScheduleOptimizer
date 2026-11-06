@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using Klacks.ScheduleOptimizer.Common.Rotation;
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Agent;
 using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
@@ -13,7 +14,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Conductor;
 /// Layer 1 — Dirigent. Iterates slots in chronological order. Per slot, every agent submits a bid;
 /// the highest-scoring Stage-0+Stage-1-clean bid above AcceptanceThreshold wins Round 1.
 /// If no bid is Stage-1-clean, the highest-scoring Stage-0-clean bid wins Round 2 (escalation
-/// logged). If no agent is Stage-0-clean, the slot stays unassigned (Round 3) — no force-assign.
+/// logged). In Soft keyword mode Round 2 first keeps only the bidders whose placement breaks the least severe keyword
+/// wish (none, NoX, OnlyX, FREE; <see cref="KeywordWishCandidates"/>), so the hour-driven winner choice never breaks a wish
+/// - or a heavier one - that another bidder could spare; Round 2 only runs for a slot no Stage-1-clean bidder takes. If no agent is Stage-0-clean, the slot stays unassigned (Round 3) — no force-assign.
 /// Top-down roster rule: while candidates are still below their guaranteed hours, the slot goes
 /// to the best-scoring of them (ties broken by roster position, top wins). Once every candidate
 /// has reached its target the slot is surplus and goes to the bottom of the roster instead, so
@@ -169,13 +172,13 @@ public sealed class SlotAuctioneer
             return new AuctionResult(slotId, winner.AgentId, 1, bids, vetos);
         }
 
-        if (round2Candidates.Count > 0)
+        if (round2Candidates.Count > 0 && DateOnly.TryParse(slot.Date, out var slotDate))
         {
-            var winner = SelectWinner(round2Candidates, c => c.Bid.AgentId, c => c.Bid.Score, states, context, rosterPosition);
-            if (DateOnly.TryParse(slot.Date, out var date))
-            {
-                escalation.Record(winner.Bid.AgentId, date, winner.V1);
-            }
+            var leastBreaking = KeywordWishCandidates.LeastBreaking(
+                round2Candidates, c => c.Bid.AgentId, context, slotDate,
+                ShiftTypeInference.FromSpanString(slot.StartTime, slot.EndTime));
+            var winner = SelectWinner(leastBreaking, c => c.Bid.AgentId, c => c.Bid.Score, states, context, rosterPosition);
+            escalation.Record(winner.Bid.AgentId, slotDate, winner.V1);
             return new AuctionResult(slotId, winner.Bid.AgentId, 2, bids, vetos);
         }
 

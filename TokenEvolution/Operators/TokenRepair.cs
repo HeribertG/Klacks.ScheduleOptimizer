@@ -2,6 +2,7 @@
 
 using System.Globalization;
 using Klacks.ScheduleOptimizer.Constraints;
+using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
@@ -28,6 +29,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// the priority order of the specification (coverage first, the 5/2 package ideal far below it).
 /// Since the owner ruling of 2026-08-12 the ladder can no longer trade the package rest: MinRestDays
 /// (as hours) vetoes on every rung, so only the MaxWorkDays block ideal remains escalatable.
+/// In <see cref="KeywordMode.Soft"/> one more rung follows, <see cref="SlotRelaxation.KeywordWishes"/>: a keyword wish
+/// breaks only where no wish-abiding fill (direct or relocated) exists, and of its direct candidates only those breaking
+/// the least severe wish stay (<see cref="KeywordWishCandidates"/>), before the hour-driven pick.
 /// </para>
 /// </summary>
 public sealed class TokenRepair : ITokenOperator
@@ -117,6 +121,8 @@ public sealed class TokenRepair : ITokenOperator
         SlotRelaxation.All,
     ];
 
+    private static readonly SlotRelaxation[] SoftKeywordCoverageLadder = [.. CoverageLadder, SlotRelaxation.KeywordWishes];
+
     private readonly TokenConstraintChecker _checker;
 
     public TokenRepair(TokenConstraintChecker checker)
@@ -132,7 +138,8 @@ public sealed class TokenRepair : ITokenOperator
     /// </summary>
     /// <param name="context">Scenario to repair, wizard context and the random source</param>
     /// <param name="escalations">
-    /// Optional sink invoked once per slot that was staffed on <see cref="SlotRelaxation.All"/>;
+    /// Optional sink invoked once per slot that was staffed on <see cref="SlotRelaxation.All"/> or, in Soft keyword
+    /// mode, on <see cref="SlotRelaxation.KeywordWishes"/>;
     /// null switches the reporting off and costs one null check per escalated fill.
     /// </param>
     public CoreScenario Apply(TokenOperatorContext context, Action<string>? escalations)
@@ -346,7 +353,7 @@ public sealed class TokenRepair : ITokenOperator
         List<CoreAgent> candidates = [];
         var reached = SlotRelaxation.None;
 
-        foreach (var rung in CoverageLadder)
+        foreach (var rung in wizard.KeywordMode == KeywordMode.Soft ? SoftKeywordCoverageLadder : CoverageLadder)
         {
             candidates = wizard.Agents
                 .Where(agent => !occupiedAgents.Contains(agent.Id)
@@ -375,6 +382,12 @@ public sealed class TokenRepair : ITokenOperator
             return false;
         }
 
+        if (reached == SlotRelaxation.KeywordWishes)
+        {
+            candidates = KeywordWishCandidates.LeastBreaking(
+                candidates, agent => agent.Id, wizard, violation.Date.Value, shiftTypeIndex);
+        }
+
         // A10/A11 as a deterministic fill priority (M11d, 2026-08-13): when the slot IS the next
         // continuation day of an open carried-in package and its owner is a valid candidate, the
         // owner takes it — before any roulette and before the night tie-break, which otherwise
@@ -384,7 +397,7 @@ public sealed class TokenRepair : ITokenOperator
                 candidates, primary.Tokens, wizard.Agents, rng,
                 agent => ExtendsAPackage(agent, violation.Date.Value, primary.Tokens, wizard),
                 balanceNightShare: shiftTypeIndex == RosterPositionBias.NightShiftTypeIndex);
-        if (reached == SlotRelaxation.All)
+        if (reached >= SlotRelaxation.All)
         {
             ReportEscalation(escalations, chosen.Id, violation.Date.Value, DirectFill);
         }
@@ -455,7 +468,12 @@ public sealed class TokenRepair : ITokenOperator
     {
         repaired = primary;
 
-        foreach (var agent in wizard.Agents)
+        // On the keyword rung the agents are tried least severe wish first (stable, roster order within a severity), so
+        // a relocation breaks the lightest wish that frees the slot.
+        var agents = relaxation == SlotRelaxation.KeywordWishes
+            ? wizard.Agents.OrderBy(a => KeywordWishCandidates.SeverityOf(wizard, a.Id, slotDate, shiftTypeIndex)).ToList()
+            : wizard.Agents;
+        foreach (var agent in agents)
         {
             if (occupiedAgents.Contains(agent.Id))
             {
@@ -718,7 +736,7 @@ public sealed class TokenRepair : ITokenOperator
     /// </summary>
     /// <param name="relaxation">Rung the open slot is being filled on</param>
     private static SlotRelaxation ReceiverRelaxation(SlotRelaxation relaxation)
-        => relaxation == SlotRelaxation.All ? SlotRelaxation.RestDaysOnly : relaxation;
+        => relaxation >= SlotRelaxation.All ? SlotRelaxation.RestDaysOnly : relaxation;
 
     /// <summary>
     /// Reports a relocation that only the widest rung made possible.
@@ -730,7 +748,7 @@ public sealed class TokenRepair : ITokenOperator
     private static void ReportRelocationEscalation(
         Action<string>? escalations, SlotRelaxation relaxation, string agentId, DateOnly slotDate)
     {
-        if (relaxation != SlotRelaxation.All)
+        if (relaxation < SlotRelaxation.All)
         {
             return;
         }

@@ -4,8 +4,9 @@ namespace Klacks.ScheduleOptimizer.Models;
 
 /// <summary>
 /// How a run treats the restricting schedule commands (FREE, OnlyX, NoX). Hard vetoes them like any other hard rule.
-/// Soft turns them into ranked penalties (FREE above OnlyX above NoX) that rank below the guaranteed hours and above
-/// the target hours, so a slot can still be covered against a wish. Positive wishes (-FREE, OnlyX) attract in both modes.
+/// Soft turns them into wishes in strict tiers (one broken FREE outweighs any number of broken OnlyX, one OnlyX any number
+/// of NoX) that rank right after coverage and before the guaranteed hours: a wish is broken only to cover an otherwise
+/// open slot, never for guaranteed or target hours. Positive wishes (-FREE, OnlyX) attract in both modes.
 /// </summary>
 public enum KeywordMode
 {

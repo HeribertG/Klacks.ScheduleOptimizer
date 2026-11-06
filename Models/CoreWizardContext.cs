@@ -75,8 +75,9 @@ public class CoreWizardContext
     public double SchedulingMaxWeeklyHours { get; init; } = 50;
 
     /// <summary>
-    /// How the run treats the restricting schedule commands: Hard (default) vetoes them, Soft ranks them as wish
-    /// penalties below the guaranteed hours. Positive wishes attract in both modes.
+    /// How the run treats the restricting schedule commands: Hard (default) vetoes them, Soft treats them as wishes
+    /// in strict tiers that may break only to cover an otherwise open slot (ranked after coverage, before the guaranteed
+    /// hours). Positive wishes attract in both modes.
     /// </summary>
     public KeywordMode KeywordMode { get; init; } = KeywordMode.Hard;
 
