@@ -40,6 +40,7 @@ public sealed class TokenEvolutionLoop
     private const string SurplusReturnStage = "surplusReturn";
     private const string KindBalanceStage = "kindBalance";
     private const string OrderBalanceStage = "orderBalance";
+    private const string WishRepairStage = "wishRepair";
     private const string SweepAfterPassesStage = "sweep2";
 
     private const string SwapStage = "mutation.swap";
@@ -68,6 +69,7 @@ public sealed class TokenEvolutionLoop
     private readonly RotationBalancer _prefixRotationBalancer = new(includePrefixSwaps: true);
     private readonly PurityBalancer _purityBalancer = new();
     private readonly ObjectContinuityBalancer _orderBalancer = new();
+    private readonly WishRepairSwap _wishRepair = new();
 
     public TokenEvolutionLoop(
         TokenPopulationBuilder populationBuilder,
@@ -217,6 +219,7 @@ public sealed class TokenEvolutionLoop
         var surplusReturnSeen = new HashSet<string>(StringComparer.Ordinal);
         var balanceSeen = new HashSet<string>(StringComparer.Ordinal);
         var orderBalanceSeen = new HashSet<string>(StringComparer.Ordinal);
+        var wishRepairSeen = new HashSet<string>(StringComparer.Ordinal);
 
         for (var generation = 1; generation <= config.MaxGenerations; generation++)
         {
@@ -323,6 +326,11 @@ public sealed class TokenEvolutionLoop
             ReportOverlong(blockDiagnostics, generation, OrderBalanceStage, beforePass, currentBest, context);
             ReportShortPackages(packageDiagnostics, generation, OrderBalanceStage, beforePass, currentBest, context);
 
+            beforePass = currentBest;
+            currentBest = RunWishRepair(currentBest, context, evaluator, wishRepairSeen, trace);
+            ReportOverlong(blockDiagnostics, generation, WishRepairStage, beforePass, currentBest, context);
+            ReportShortPackages(packageDiagnostics, generation, WishRepairStage, beforePass, currentBest, context);
+
             // The handover and balance passes reshape blocks, which can open a legal fill for a slot
             // the first sweep had to skip — one more sweep catches it in the same generation.
             beforePass = currentBest;
@@ -375,7 +383,8 @@ public sealed class TokenEvolutionLoop
 
     /// <summary>
     /// Runs the deterministic end passes on an evolved plan: whole-block rotation balance, purity balance, then the
-    /// rotation balance once more with prefix swaps and a final purity balance. The prefix swaps come after the first
+    /// rotation balance once more with prefix swaps and a final purity balance, and last the repair of unfulfilled
+    /// positive keyword wishes (<see cref="WishRepairSwap"/>), so no later pass can trade a repaired wish away. The prefix swaps come after the first
     /// purity pass on purpose: run earlier they block the purity swaps that dissolve mixed packages (measured
     /// 2026-10-10). They sit outside the loop so their swaps never move the search paths of the population.
     /// </summary>
@@ -395,7 +404,10 @@ public sealed class TokenEvolutionLoop
         var best = RunRotationBalance(_rotationBalancer, evolved, context, evaluator, trace, cancellationToken);
         best = RunPurityBalance(best, context, evaluator, trace, cancellationToken);
         best = RunRotationBalance(_prefixRotationBalancer, best, context, evaluator, trace, cancellationToken);
-        return RunPurityBalance(best, context, evaluator, trace, cancellationToken);
+        best = RunPurityBalance(best, context, evaluator, trace, cancellationToken);
+        return cancellationToken.IsCancellationRequested
+            ? best
+            : RunWishRepair(best, context, evaluator, new HashSet<string>(StringComparer.Ordinal), trace);
     }
 
     /// <summary>
@@ -709,6 +721,28 @@ public sealed class TokenEvolutionLoop
 
         trace?.Invoke($"Run: surplus-hours return accepted ({CountReowned(returned, scenario)} shifts, stage1={returned.FitnessStage1:F4}, stage2={returned.FitnessStage2:F4})");
         return returned;
+    }
+
+    private CoreScenario RunWishRepair(
+        CoreScenario scenario,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator,
+        HashSet<string> alreadyOffered,
+        Action<string>? trace = null)
+    {
+        if (!alreadyOffered.Add(scenario.Id))
+        {
+            return scenario;
+        }
+
+        var repaired = _wishRepair.Apply(scenario, context, evaluator);
+        if (ReferenceEquals(repaired, scenario))
+        {
+            return scenario;
+        }
+
+        trace?.Invoke($"Run: wish repair accepted ({CountReowned(repaired, scenario)} shifts, unfulfilled {scenario.FitnessKeywordWishes.Unfulfilled} -> {repaired.FitnessKeywordWishes.Unfulfilled})");
+        return repaired;
     }
 
     /// <summary>Number of tokens that changed owner between two plans of identical token order.</summary>
