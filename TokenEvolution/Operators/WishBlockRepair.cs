@@ -120,6 +120,12 @@ public sealed class WishBlockRepair
                     continue;
                 }
 
+                var conflicts = ConflictsOf(current.Tokens, agent, block, inputs);
+                if (conflicts is null)
+                {
+                    continue;
+                }
+
                 for (var option = 0; option < HolderOptions; option++)
                 {
                     if (evaluationsLeft.Value <= 0)
@@ -127,7 +133,13 @@ public sealed class WishBlockRepair
                         return null;
                     }
 
-                    var candidateTokens = BuildMove(current.Tokens, inputs, agent, block, open, option);
+                    var taken = SelectHolderShifts(current.Tokens, inputs, agent, block, open, option);
+                    if (taken is null)
+                    {
+                        break;
+                    }
+
+                    var candidateTokens = BuildMove(current.Tokens, inputs, agent, taken, conflicts);
                     if (candidateTokens is null)
                     {
                         continue;
@@ -183,29 +195,16 @@ public sealed class WishBlockRepair
     }
 
     /// <summary>
-    /// The tokens after the block move with holder option <paramref name="option"/>, or null when the option does not
-    /// exist on an open day, a shift in the employee's window may not move or a receiving side refuses a shift.
+    /// The tokens after the block move: the <paramref name="taken"/> holder shifts go to the employee, her
+    /// <paramref name="conflicts"/> to other employees; null when a receiving side refuses a shift.
     /// </summary>
     private static List<CoreToken>? BuildMove(
         IReadOnlyList<CoreToken> tokens,
         WishBlockMoveInputs inputs,
         CoreAgent wisher,
-        IReadOnlyList<DateOnly> block,
-        IReadOnlySet<(string AgentId, DateOnly Date)> open,
-        int option)
+        IReadOnlyList<int> taken,
+        IReadOnlyList<int> conflicts)
     {
-        var taken = SelectHolderShifts(tokens, inputs, wisher, block, open, option);
-        if (taken is null)
-        {
-            return null;
-        }
-
-        var conflicts = ConflictsOf(tokens, wisher, block, inputs);
-        if (conflicts is null)
-        {
-            return null;
-        }
-
         var owners = tokens.Select(token => token.AgentId).ToArray();
         foreach (var index in conflicts)
         {
@@ -229,7 +228,7 @@ public sealed class WishBlockRepair
 
     /// <summary>
     /// On each open block day the <paramref name="option"/>-th movable shift of a wanted kind another employee holds, in
-    /// roster and start order; null when some open day has fewer candidates.
+    /// roster and start order; null when some open day has fewer candidates, and then for every higher option as well.
     /// </summary>
     private static List<int>? SelectHolderShifts(
         IReadOnlyList<CoreToken> tokens,
