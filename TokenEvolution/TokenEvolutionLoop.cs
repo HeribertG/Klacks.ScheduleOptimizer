@@ -70,6 +70,7 @@ public sealed class TokenEvolutionLoop
     private readonly PurityBalancer _purityBalancer = new();
     private readonly ObjectContinuityBalancer _orderBalancer = new();
     private readonly WishRepairSwap _wishRepair = new();
+    private readonly WishBlockRepair _wishBlockRepair = new();
 
     public TokenEvolutionLoop(
         TokenPopulationBuilder populationBuilder,
@@ -384,7 +385,8 @@ public sealed class TokenEvolutionLoop
     /// <summary>
     /// Runs the deterministic end passes on an evolved plan: whole-block rotation balance, purity balance, then the
     /// rotation balance once more with prefix swaps and a final purity balance, and last the repair of unfulfilled
-    /// positive keyword wishes (<see cref="WishRepairSwap"/>), so no later pass can trade a repaired wish away. The prefix swaps come after the first
+    /// positive keyword wishes (<see cref="WishRepairSwap"/>, then <see cref="WishBlockRepair"/>), so no later pass can
+    /// trade a repaired wish away. The prefix swaps come after the first
     /// purity pass on purpose: run earlier they block the purity swaps that dissolve mixed packages (measured
     /// 2026-10-10). They sit outside the loop so their swaps never move the search paths of the population.
     /// </summary>
@@ -735,7 +737,7 @@ public sealed class TokenEvolutionLoop
             return scenario;
         }
 
-        var repaired = _wishRepair.Apply(scenario, context, evaluator);
+        var repaired = _wishBlockRepair.Apply(_wishRepair.Apply(scenario, context, evaluator), context, evaluator);
         if (ReferenceEquals(repaired, scenario))
         {
             return scenario;

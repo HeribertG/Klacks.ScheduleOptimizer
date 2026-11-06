@@ -237,7 +237,7 @@ public sealed class WishRepairSwap
             && candidate.FitnessStage1 >= current.FitnessStage1 - StageTolerance
             && candidate.FitnessStage2 >= current.FitnessStage2 - StageTolerance;
 
-    private static bool AcceptsToken(CoreAgent receiver, CoreToken token, IReadOnlyList<CoreToken> receiverTokens, CoreWizardContext context)
+    internal static bool AcceptsToken(CoreAgent receiver, CoreToken token, IReadOnlyList<CoreToken> receiverTokens, CoreWizardContext context)
         => SlotConstraintFilter.IsValidAssignment(
             receiver,
             token.Date,
@@ -249,14 +249,14 @@ public sealed class WishRepairSwap
             token.StartAt,
             token.EndAt);
 
-    private static CoreToken Reowned(CoreToken token, CoreAgent receiver)
+    internal static CoreToken Reowned(CoreToken token, CoreAgent receiver)
         => token with
         {
             AgentId = receiver.Id,
             Surcharges = SurchargeEstimator.Estimate(token.TotalHours, token.ShiftTypeIndex, token.Date, receiver),
         };
 
-    private static bool IsMovable(CoreToken token, IReadOnlySet<(string AgentId, DateOnly Date, Guid ShiftRefId)> continuation)
+    internal static bool IsMovable(CoreToken token, IReadOnlySet<(string AgentId, DateOnly Date, Guid ShiftRefId)> continuation)
         => !token.IsLocked && !continuation.Contains((token.AgentId, token.Date, token.ShiftRefId));
 
     private static List<CoreToken> TokensOf(IReadOnlyList<CoreToken> tokens, string agentId, int? exceptIndex)
