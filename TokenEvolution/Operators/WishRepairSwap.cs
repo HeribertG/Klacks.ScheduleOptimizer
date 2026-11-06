@@ -23,7 +23,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// eligibility (availability included), contract days, breaks, the employee's own keyword restrictions, block length,
 /// rest days, minimum pause, weekly and daily hours. A move is accepted only when it lowers the unfulfilled wishes and
 /// leaves legality, coverage, the broken tiers, Stage 1 and Stage 2 no worse (<see cref="IsRepair"/>), so the
-/// lexicographic fitness strictly improves; locked shifts and the shifts of an open carried-in package never move. Like
+/// lexicographic fitness strictly improves, and when no employee who reached the guaranteed hours falls short of them
+/// (<see cref="IsAcceptedRepair"/>); locked shifts and the shifts of an open carried-in package never move. Like
 /// the hand-over passes it only rewrites token owners, so coverage cannot change. No random source: wishes in roster
 /// and date order, candidates in a fixed order; at most <see cref="MaxEvaluations"/> candidates are evaluated per call.
 /// </para>
@@ -42,23 +43,35 @@ public sealed class WishRepairSwap
     /// <summary>Stages 1 and 2 may differ by floating-point noise of a different summation order without counting as worse.</summary>
     private const double StageTolerance = 1e-9;
 
+    /// <summary>An exchange needs a wisher and at least one other employee.</summary>
+    internal const int MinAgentsForExchange = 2;
+
     /// <summary>
     /// Returns a plan with fewer unfulfilled positive wishes, or the unchanged input when no exchange improves the fitness.
     /// </summary>
-    /// <param name="scenario">Plan to repair; never modified</param>
+    /// <param name="scenario">Plan to repair; its tokens are never modified, its fitness fields are (re)evaluated</param>
     /// <param name="context">Wizard context supplying the roster, the rules and the schedule commands</param>
     /// <param name="evaluator">Fitness evaluator used as the per-move acceptance gate</param>
     public CoreScenario Apply(CoreScenario scenario, CoreWizardContext context, TokenFitnessEvaluator evaluator)
+        => Repair(scenario, context, evaluator).Scenario;
+
+    /// <summary>
+    /// <see cref="Apply"/> together with the number of exchanges it accepted, for the run's trace.
+    /// </summary>
+    /// <param name="scenario">Plan to repair; its tokens are never modified, its fitness fields are (re)evaluated</param>
+    /// <param name="context">Wizard context supplying the roster, the rules and the schedule commands</param>
+    /// <param name="evaluator">Fitness evaluator used as the per-move acceptance gate</param>
+    public WishRepairOutcome Repair(CoreScenario scenario, CoreWizardContext context, TokenFitnessEvaluator evaluator)
     {
-        if (context.Agents.Count < 2 || scenario.Tokens.Count == 0 || context.ScheduleCommands.Count == 0)
+        if (context.Agents.Count < MinAgentsForExchange || scenario.Tokens.Count == 0 || context.ScheduleCommands.Count == 0)
         {
-            return scenario;
+            return new WishRepairOutcome(scenario, 0);
         }
 
         var wishes = WizardKeywordWishes.For(context);
         if (wishes.Days.Count == 0)
         {
-            return scenario;
+            return new WishRepairOutcome(scenario, 0);
         }
 
         evaluator.Evaluate(scenario, context);
@@ -69,6 +82,7 @@ public sealed class WishRepairSwap
 
         var evaluationsLeft = new StrongBox<int>(MaxEvaluations);
         var current = scenario;
+        var acceptedMoves = 0;
         for (var move = 0; move < MaxRepairs; move++)
         {
             var accepted = RepairOne(current, context, evaluator, wishes, agents, rosterIndex, continuation, evaluationsLeft);
@@ -78,9 +92,10 @@ public sealed class WishRepairSwap
             }
 
             current = accepted;
+            acceptedMoves++;
         }
 
-        return current;
+        return new WishRepairOutcome(current, acceptedMoves);
     }
 
     private static CoreScenario? RepairOne(
@@ -221,7 +236,7 @@ public sealed class WishRepairSwap
         var candidate = TokenSwapMutation.CloneScenario(current, candidateTokens);
         evaluationsLeft.Value--;
         evaluator.Evaluate(candidate, context);
-        return IsRepair(candidate, current) ? candidate : null;
+        return IsAcceptedRepair(candidate, current, evaluator, context) ? candidate : null;
     }
 
     /// <summary>
@@ -236,6 +251,14 @@ public sealed class WishRepairSwap
             && candidate.FitnessKeywordWishes.CompareBrokenTo(current.FitnessKeywordWishes) <= 0
             && candidate.FitnessStage1 >= current.FitnessStage1 - StageTolerance
             && candidate.FitnessStage2 >= current.FitnessStage2 - StageTolerance;
+
+    /// <summary>
+    /// The acceptance gate of both wish repairs: <see cref="IsRepair"/>, and no employee who reaches the guaranteed hours
+    /// before the move falls short of them after it (<see cref="TokenFitnessEvaluator.KeepsEveryGuarantee"/>).
+    /// </summary>
+    internal static bool IsAcceptedRepair(
+        CoreScenario candidate, CoreScenario current, TokenFitnessEvaluator evaluator, CoreWizardContext context)
+        => IsRepair(candidate, current) && evaluator.KeepsEveryGuarantee(candidate, current, context);
 
     internal static bool AcceptsToken(CoreAgent receiver, CoreToken token, IReadOnlyList<CoreToken> receiverTokens, CoreWizardContext context)
         => SlotConstraintFilter.IsValidAssignment(

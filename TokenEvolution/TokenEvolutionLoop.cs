@@ -41,6 +41,8 @@ public sealed class TokenEvolutionLoop
     private const string KindBalanceStage = "kindBalance";
     private const string OrderBalanceStage = "orderBalance";
     private const string WishRepairStage = "wishRepair";
+    private const string EvolutionPhase = "during evolution";
+    private const string FinalPassesPhase = "in the end passes";
     private const string SweepAfterPassesStage = "sweep2";
 
     private const string SwapStage = "mutation.swap";
@@ -221,6 +223,7 @@ public sealed class TokenEvolutionLoop
         var balanceSeen = new HashSet<string>(StringComparer.Ordinal);
         var orderBalanceSeen = new HashSet<string>(StringComparer.Ordinal);
         var wishRepairSeen = new HashSet<string>(StringComparer.Ordinal);
+        var wishRepairTally = new WishRepairTally();
 
         for (var generation = 1; generation <= config.MaxGenerations; generation++)
         {
@@ -328,7 +331,7 @@ public sealed class TokenEvolutionLoop
             ReportShortPackages(packageDiagnostics, generation, OrderBalanceStage, beforePass, currentBest, context);
 
             beforePass = currentBest;
-            currentBest = RunWishRepair(currentBest, context, evaluator, wishRepairSeen, trace);
+            currentBest = RunWishRepair(currentBest, context, evaluator, wishRepairSeen, wishRepairTally, trace);
             ReportOverlong(blockDiagnostics, generation, WishRepairStage, beforePass, currentBest, context);
             ReportShortPackages(packageDiagnostics, generation, WishRepairStage, beforePass, currentBest, context);
 
@@ -378,6 +381,7 @@ public sealed class TokenEvolutionLoop
             }
         }
 
+        trace?.Invoke(wishRepairTally.Describe(EvolutionPhase));
         trace?.Invoke($"Run: evolution {sw.ElapsedMilliseconds}ms");
         return best;
     }
@@ -407,9 +411,15 @@ public sealed class TokenEvolutionLoop
         best = RunPurityBalance(best, context, evaluator, trace, cancellationToken);
         best = RunRotationBalance(_prefixRotationBalancer, best, context, evaluator, trace, cancellationToken);
         best = RunPurityBalance(best, context, evaluator, trace, cancellationToken);
-        return cancellationToken.IsCancellationRequested
-            ? best
-            : RunWishRepair(best, context, evaluator, new HashSet<string>(StringComparer.Ordinal), trace);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return best;
+        }
+
+        var wishRepairTally = new WishRepairTally();
+        best = RunWishRepair(best, context, evaluator, new HashSet<string>(StringComparer.Ordinal), wishRepairTally, trace);
+        trace?.Invoke(wishRepairTally.Describe(FinalPassesPhase));
+        return best;
     }
 
     /// <summary>
@@ -730,6 +740,7 @@ public sealed class TokenEvolutionLoop
         CoreWizardContext context,
         TokenFitnessEvaluator evaluator,
         HashSet<string> alreadyOffered,
+        WishRepairTally tally,
         Action<string>? trace = null)
     {
         if (!alreadyOffered.Add(scenario.Id))
@@ -737,13 +748,16 @@ public sealed class TokenEvolutionLoop
             return scenario;
         }
 
-        var repaired = _wishBlockRepair.Apply(_wishRepair.Apply(scenario, context, evaluator), context, evaluator);
+        var swapped = _wishRepair.Repair(scenario, context, evaluator);
+        var blocked = _wishBlockRepair.Repair(swapped.Scenario, context, evaluator);
+        tally.Add(swapped.AcceptedMoves, blocked.AcceptedMoves);
+        var repaired = blocked.Scenario;
         if (ReferenceEquals(repaired, scenario))
         {
             return scenario;
         }
 
-        trace?.Invoke($"Run: wish repair accepted ({CountReowned(repaired, scenario)} shifts, unfulfilled {scenario.FitnessKeywordWishes.Unfulfilled} -> {repaired.FitnessKeywordWishes.Unfulfilled})");
+        trace?.Invoke($"Run: wish repair accepted ({CountReowned(repaired, scenario)} shifts, single swaps {swapped.AcceptedMoves}, block moves {blocked.AcceptedMoves}, unfulfilled {scenario.FitnessKeywordWishes.Unfulfilled} -> {repaired.FitnessKeywordWishes.Unfulfilled})");
         return repaired;
     }
 

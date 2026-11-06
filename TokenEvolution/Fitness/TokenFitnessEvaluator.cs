@@ -251,6 +251,29 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         return WizardKeywordWishes.For(context).Evaluate(scenario.Tokens, collectItems: false).Tally;
     }
 
+    /// <summary>
+    /// True when no employee who reaches the guaranteed hours in <paramref name="current"/> falls short of them in
+    /// <paramref name="candidate"/>. Stage 1 alone is a rank-weighted sum, so it can rise while a lower-ranked employee
+    /// loses the guarantee to a higher-ranked one; a move that must never cost anyone the guarantee checks this as well.
+    /// </summary>
+    /// <param name="candidate">The plan after the move</param>
+    /// <param name="current">The plan before the move</param>
+    /// <param name="context">Wizard context both plans belong to</param>
+    public bool KeepsEveryGuarantee(CoreScenario candidate, CoreScenario current, CoreWizardContext context)
+    {
+        var before = ComputeStage1(current, context).Flags;
+        var after = ComputeStage1(candidate, context).Flags;
+        for (var i = 0; i < before.Count; i++)
+        {
+            if (before[i] == 1 && after[i] == 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private (IReadOnlyList<int> Flags, double CompletionRate) ComputeStage1(CoreScenario scenario, CoreWizardContext context)
     {
         var flags = new List<int>(_agentsInPriorityOrder.Count);
