@@ -13,6 +13,20 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
 /// untouched. States are ranked by per-row fitness plus global harmony; each finished state then has to pass
 /// <see cref="RegionAdmission"/> (first instance) and raise the global harmony (second instance). The best admitted
 /// state is returned as a <see cref="RegionCandidate"/>, or null when no rebuild is admitted.
+/// <para>
+/// Pre-existing violations: the beam prunes a state only when it creates a NEW invalid cell, following the
+/// receiving-side policy of the domain validator (existing violations are never forced away, but no new ones are
+/// created). A cell that fails <see cref="RegionAdmission.CellValid"/> is tolerated
+/// (<see cref="RegionAdmission.CreatesNewViolation"/>) only when it still holds the same cell as the base plan and that
+/// cell was already invalid there (e.g. a locked late duty of an agent without shift work). A cell that was valid in
+/// the base plan and turns invalid, also through a changed neighbour (pause, consecutive days, weekly hours), rejects
+/// the state; so does every changed cell that is invalid, which keeps a pre-existing violation from being passed on to
+/// another cell. Any worsening of a tolerated cell has to come from a changed cell of the same row, and that changed
+/// cell is checked against the same rules, so it rejects the state. Weekly rest days compare a row with its base row,
+/// so they are not judged per cell in the beam but per row in <see cref="RegionAdmission.Admit"/>. Orderings of a day
+/// that only differ by interchangeable cells are tried once, in the variant that leaves the most cells in place, so an
+/// unlocked tolerated cell is not displaced by an identical-looking one and rejected for it.
+/// </para>
 /// </summary>
 /// <param name="admission">First instance (rules, target hours, per-row fitness floor).</param>
 /// <param name="harmony">Second instance (global harmony).</param>
@@ -65,7 +79,7 @@ public sealed class RegionRebuilder
                         bitmap.SetCell(unlocked[i], day, cells[order[i]]);
                     }
 
-                    if (!DaysValid(bitmap, rows, region, day))
+                    if (!DaysValid(baseBitmap, bitmap, rows, region, day))
                     {
                         continue;
                     }
@@ -145,15 +159,14 @@ public sealed class RegionRebuilder
         return steps;
     }
 
-    private bool DaysValid(HarmonyBitmap bitmap, IReadOnlyList<int> rows, HarmonyRegion region, int day)
+    private bool DaysValid(HarmonyBitmap baseBitmap, HarmonyBitmap bitmap, IReadOnlyList<int> rows, HarmonyRegion region, int day)
     {
-        // A cell is final once both neighbours are placed: the previous day now, the last day at the end.
-        if (day > region.DayFrom && rows.Any(r => !_admission.CellValid(bitmap, r, day - 1)))
+        if (day > region.DayFrom && rows.Any(r => _admission.CreatesNewViolation(baseBitmap, bitmap, r, day - 1)))
         {
             return false;
         }
 
-        return day != region.DayTo || rows.All(r => _admission.CellValid(bitmap, r, day));
+        return day != region.DayTo || !rows.Any(r => _admission.CreatesNewViolation(baseBitmap, bitmap, r, day));
     }
 
     private static IEnumerable<int[]> DistinctOrders(Cell[] cells)
@@ -164,9 +177,26 @@ public sealed class RegionRebuilder
             var signature = string.Join('|', order.Select(i => Signature(cells[i])));
             if (seen.Add(signature))
             {
-                yield return (int[])order.Clone();
+                yield return KeepCellsInPlace(cells, order);
             }
         }
+    }
+
+    private static int[] KeepCellsInPlace(Cell[] cells, int[] order)
+    {
+        var result = (int[])order.Clone();
+        for (var i = 0; i < result.Length; i++)
+        {
+            if (result[i] == i || Signature(cells[result[i]]) != Signature(cells[i]))
+            {
+                continue;
+            }
+
+            var holder = Array.IndexOf(result, i);
+            (result[i], result[holder]) = (i, result[i]);
+        }
+
+        return result;
     }
 
     private static IEnumerable<int[]> Permutations(int[] items, int start)

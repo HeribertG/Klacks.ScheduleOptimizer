@@ -143,9 +143,10 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     /// <summary>
     /// End-state check of one cell as it stands in <paramref name="bitmap"/>: the same domain rules a receiving side
     /// of a same-day swap must satisfy (day restrictions, eligibility, minimum pause to both neighbours, maximum
-    /// consecutive days, maximum weekly hours, weekly rest days), evaluated against the row's current neighbours.
-    /// Used by Wizard 3's region rebuild, which rearranges several cells at once and therefore cannot validate step by
-    /// step. A free cell is always valid. Planning rules are not part of this check, see <see cref="DiagnoseRowRebuild"/>.
+    /// consecutive days, maximum weekly hours), evaluated against the row's current neighbours. Used by Wizard 3's
+    /// region rebuild, which rearranges several cells at once and therefore cannot validate step by step. A free cell is
+    /// always valid. Weekly rest days and planning rules are not part of this check: both compare a plan with the plan
+    /// before the change, which a cell standing in place does not have; see <see cref="DiagnoseRowRebuild"/>.
     /// </summary>
     public string? DiagnoseCellInPlace(HarmonyBitmap bitmap, int row, int day)
     {
@@ -155,10 +156,11 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
 
     /// <summary>
     /// End-state check of a rebuilt row: every changed cell must pass <see cref="DiagnoseCellInPlace"/> in the rebuilt
-    /// plan, and the changed cells together must create or worsen no hard planning-rule finding compared with
-    /// <paramref name="original"/>. Null when the row is valid, otherwise a short reason.
+    /// plan, and the changed cells together must take no calendar week below the weekly rest days and create or worsen
+    /// no hard planning-rule finding compared with <paramref name="original"/>. Null when the row is valid, otherwise a
+    /// short reason.
     /// </summary>
-    /// <param name="original">The plan before the rebuild (reference for the planning-rule comparison).</param>
+    /// <param name="original">The plan before the rebuild (reference for the rest-day and planning-rule comparison).</param>
     /// <param name="rebuilt">The plan after the rebuild.</param>
     /// <param name="row">The rebuilt row.</param>
     /// <param name="changedDays">Days of the row whose cell differs between the two plans.</param>
@@ -176,13 +178,14 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             }
         }
 
-        if (_planningRules is null || changedDays.Count == 0)
+        if (changedDays.Count == 0)
         {
             return null;
         }
 
         var replacements = changedDays.Select(d => (d, rebuilt.GetCell(row, d))).ToArray();
-        return DiagnosePlanningRules(original, row, replacements, "row");
+        return DiagnoseWeeklyRestDays(original, row, original.Rows[row], replacements, "row")
+            ?? DiagnosePlanningRules(original, row, replacements, "row");
     }
 
     private static string? DiagnoseBitmapLocal(HarmonyBitmap bitmap, ReplaceMove move)

@@ -41,6 +41,27 @@ public sealed class RegionAdmission
     public bool CellValid(HarmonyBitmap bitmap, int row, int day) => _validator.DiagnoseCellInPlace(bitmap, row, day) is null;
 
     /// <summary>
+    /// True when the cell at (<paramref name="row"/>, <paramref name="day"/>) is invalid in <paramref name="rebuilt"/>
+    /// and that invalidity is new: the cell was changed, or it is the same cell as in <paramref name="original"/> but
+    /// was valid there (a changed neighbour broke it). An unchanged cell that was already invalid in the original plan
+    /// (e.g. a locked late duty of an agent without shift work) is a pre-existing violation and returns false.
+    /// </summary>
+    /// <param name="original">The plan before the rebuild.</param>
+    /// <param name="rebuilt">The plan after (part of) the rebuild.</param>
+    /// <param name="row">Row of the cell.</param>
+    /// <param name="day">Day of the cell.</param>
+    public bool CreatesNewViolation(HarmonyBitmap original, HarmonyBitmap rebuilt, int row, int day)
+    {
+        if (CellValid(rebuilt, row, day))
+        {
+            return false;
+        }
+
+        var unchanged = ReferenceEquals(rebuilt.GetCell(row, day), original.GetCell(row, day));
+        return !unchanged || CellValid(original, row, day);
+    }
+
+    /// <summary>
     /// Returns the fitness of <paramref name="rebuilt"/> when it is admitted against <paramref name="original"/>,
     /// otherwise null.
     /// </summary>
