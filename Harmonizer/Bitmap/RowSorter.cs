@@ -3,7 +3,8 @@
 namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 
 /// <summary>
-/// Determines the top-down processing order for the conductor. Primary: target hours descending.
+/// Determines the top-down processing order for the conductor. First: real persons before stand-ins (placeholders),
+/// so a stand-in is filled last even against a real person with zero target hours. Then: target hours descending.
 /// Tiebreaker: count of cells whose symbol is in the agent's preferred set, descending. Final
 /// tiebreaker: agent id (stable, deterministic).
 /// </summary>
@@ -21,7 +22,7 @@ public static class RowSorter
         for (var r = 0; r < bitmap.RowCount; r++)
         {
             var agent = bitmap.Rows[r];
-            keys[r] = new RowKey(r, agent.TargetHours, CountPreferredMatches(bitmap, r, agent), agent.Id);
+            keys[r] = new RowKey(r, agent.IsStandIn, agent.TargetHours, CountPreferredMatches(bitmap, r, agent), agent.Id);
         }
 
         Array.Sort(keys, RowKeyComparer.Instance);
@@ -52,7 +53,7 @@ public static class RowSorter
         return count;
     }
 
-    private readonly record struct RowKey(int OriginalIndex, decimal TargetHours, int PreferredMatches, string AgentId);
+    private readonly record struct RowKey(int OriginalIndex, bool IsStandIn, decimal TargetHours, int PreferredMatches, string AgentId);
 
     private sealed class RowKeyComparer : IComparer<RowKey>
     {
@@ -60,6 +61,12 @@ public static class RowSorter
 
         public int Compare(RowKey x, RowKey y)
         {
+            var byStandIn = x.IsStandIn.CompareTo(y.IsStandIn);
+            if (byStandIn != 0)
+            {
+                return byStandIn;
+            }
+
             var byHours = y.TargetHours.CompareTo(x.TargetHours);
             if (byHours != 0)
             {
