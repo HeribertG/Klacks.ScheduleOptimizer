@@ -11,13 +11,15 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Constraints;
 /// count is the Stage-0 fitness value (must be minimised to zero for any feasible solution).
 /// Behaviour is identical to the former in-class checker; the rules now live in PlanConstraintChecker
 /// so the composite objective can run the same gate against a Harmonizer bitmap.
+/// Unlike the bitmap path it hands the in-period existing works to the MaxConsecutiveDays rule: they are not in the
+/// genome, yet they stay and extend the agent's chain (owner decision 2026-11-07).
 /// </summary>
 public sealed class TokenConstraintChecker
 {
     private readonly PlanConstraintChecker _planChecker = new();
 
     public IReadOnlyList<ConstraintViolation> Check(CoreScenario scenario, CoreWizardContext context)
-        => _planChecker.Check(Project(scenario), context);
+        => _planChecker.Check(Project(scenario), context, context.ExistingWorkBlockers);
 
     public int CountViolations(CoreScenario scenario, CoreWizardContext context)
         => Check(scenario, context).Count;

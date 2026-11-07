@@ -9,7 +9,7 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 /// Stage 0 — Tabu. These rules can NEVER be broken: availability, contract weekday,
 /// the keyword restrictions (FREE, OnlyX, NoX) in <see cref="KeywordMode.Hard"/> only - in Soft mode they move to
 /// <see cref="Stage1SoftConstraintChecker"/>, MaxDailyHours (per-agent), MinPauseHours (per-agent), MaxConsecutiveDays
-/// (per-agent hard cap on block length), double-booking (incl. cross-day overnight overlap),
+/// (per-agent hard cap on block length, unlocked existing works in the period included), double-booking (incl. cross-day overnight overlap),
 /// existing-work overlap, the weekly rest days of the schedule check (<see cref="WeeklyRestDayGuard"/>).
 /// If all candidates fail here for a slot, the slot stays unassigned
 /// and the dispatcher must intervene.
@@ -449,7 +449,9 @@ public sealed class Stage0HardConstraintChecker
     ///   1. Direct anchor (work starts on this date), and
     ///   2. Cross-day shifts (e.g. a night shift that started the previous day and ends in the morning
     ///      of this date — the morning hours of <paramref name="date"/> are still occupied).
-    /// Boundary works outside [PeriodFrom, PeriodUntil] are consulted with the same semantics.
+    /// Unlocked existing works inside the period (incl. the substitute of a replacement) count with the
+    /// same semantics: the run does not plan them, but they extend the agent's chain (owner decision
+    /// 2026-11-07). Boundary works outside [PeriodFrom, PeriodUntil] are consulted the same way.
     /// A break on the date is NOT a work and the consecutive walk stops there (matches the in-period
     /// semantics where a free or break day breaks the streak).
     /// </summary>
@@ -462,6 +464,11 @@ public sealed class Stage0HardConstraintChecker
             {
                 return true;
             }
+        }
+
+        if (context.HasExistingWorkOn(agentId, date))
+        {
+            return true;
         }
 
         foreach (var locked in context.BoundaryLockedWorks)

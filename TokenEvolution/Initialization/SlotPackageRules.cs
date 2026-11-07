@@ -8,7 +8,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 /// <summary>
 /// The package rules of <see cref="SlotConstraintFilter"/> that read the occupancy around a slot: the block length
 /// (MaxWorkDays ideal and MaxConsecutiveDays cap) and the rest between two packages (MinRestDays as hours).
-/// Occupancy comes from the tokens placed so far plus the locked works and existing works on the period boundary.
+/// Occupancy comes from the tokens placed so far plus the locked works and existing works on the period boundary;
+/// the MaxConsecutiveDays cap also counts the unlocked existing works inside the period.
 /// Split off the filter so it stays readable; the filter remains the single entry point of the slot checks.
 /// </summary>
 internal static class SlotPackageRules
@@ -25,21 +26,38 @@ internal static class SlotPackageRules
             ? agent.MaxConsecutiveDays
             : context.SchedulingMaxConsecutiveDays;
 
-        var before = CountConsecutive(agent.Id, date, assigned, context, step: -1);
-        var after = CountConsecutive(agent.Id, date, assigned, context, step: +1);
-        var runLength = before + 1 + after;
-
+        var runLength = RunLength(agent.Id, date, assigned, context, includeInPeriodExistingWorks: false);
         if (softCap > 0 && runLength > softCap)
         {
             return true;
         }
 
-        if (hardCap > 0 && runLength > hardCap)
+        if (hardCap <= 0)
         {
-            return true;
+            return false;
         }
 
-        return false;
+        var cappedRunLength = context.ExistingWorkBlockers.Count == 0
+            ? runLength
+            : RunLength(agent.Id, date, assigned, context, includeInPeriodExistingWorks: true);
+        return cappedRunLength > hardCap;
+    }
+
+    /// <summary>
+    /// Length of the work block the slot day would sit in. Unlocked existing works inside the period count only
+    /// toward the MaxConsecutiveDays cap (owner decision 2026-11-07); the MaxWorkDays ideal keeps reading the
+    /// tokens and the boundary works only.
+    /// </summary>
+    private static int RunLength(
+        string agentId,
+        DateOnly date,
+        IReadOnlyList<CoreToken> assigned,
+        CoreWizardContext context,
+        bool includeInPeriodExistingWorks)
+    {
+        var before = CountConsecutive(agentId, date, assigned, context, includeInPeriodExistingWorks, step: -1);
+        var after = CountConsecutive(agentId, date, assigned, context, includeInPeriodExistingWorks, step: +1);
+        return before + 1 + after;
     }
 
     /// <summary>
@@ -295,11 +313,12 @@ internal static class SlotPackageRules
         DateOnly anchor,
         IReadOnlyList<CoreToken> assigned,
         CoreWizardContext context,
+        bool includeInPeriodExistingWorks,
         int step)
     {
         var count = 0;
         var probe = anchor.AddDays(step);
-        while (HasAssignmentOnDate(agentId, probe, assigned, context))
+        while (HasAssignmentOnDate(agentId, probe, assigned, context, includeInPeriodExistingWorks))
         {
             count++;
             probe = probe.AddDays(step);
@@ -312,7 +331,8 @@ internal static class SlotPackageRules
         string agentId,
         DateOnly date,
         IReadOnlyList<CoreToken> assigned,
-        CoreWizardContext context)
+        CoreWizardContext context,
+        bool includeInPeriodExistingWorks)
     {
         foreach (var token in assigned)
         {
@@ -320,6 +340,11 @@ internal static class SlotPackageRules
             {
                 return true;
             }
+        }
+
+        if (includeInPeriodExistingWorks && context.HasExistingWorkOn(agentId, date))
+        {
+            return true;
         }
 
         foreach (var locked in context.BoundaryLockedWorks)

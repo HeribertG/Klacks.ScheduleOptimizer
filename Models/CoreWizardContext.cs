@@ -43,7 +43,10 @@ public class CoreWizardContext
     /// </summary>
     public IReadOnlyList<CoreWarmStartAssignment> WarmStartAssignments { get; init; } = [];
 
-    /// <summary>Unlocked existing Works in the period; veto source for Stage 0 only, never lifted into the genome.</summary>
+    /// <summary>
+    /// Unlocked existing Works in the period (incl. the substitute of a replacement); never lifted into the genome.
+    /// Wizard 1 counts them for overlap, minimum pause, weekly rest days and the MaxConsecutiveDays cap.
+    /// </summary>
     public IReadOnlyList<CoreExistingWorkBlocker> ExistingWorkBlockers { get; init; } = [];
 
     /// <summary>
@@ -135,6 +138,55 @@ public class CoreWizardContext
         return lookup.TryGetValue((agentId, date), out var worksOnDay)
             ? worksOnDay
             : null;
+    }
+
+    /// <summary>Same published-once pattern as <see cref="_worksOnDateLookup"/>.</summary>
+    private Dictionary<string, HashSet<DateOnly>>? _existingWorkDaysByAgent;
+
+    /// <summary>
+    /// True when an unlocked existing work of the agent inside the period occupies any minute of the date, so a night
+    /// work counts for its start and its end day. Backs the MaxConsecutiveDays walks of Wizard 1; the per-agent day
+    /// index is built once per run instead of scanning every blocker on each probe.
+    /// </summary>
+    public bool HasExistingWorkOn(string agentId, DateOnly date)
+    {
+        if (ExistingWorkBlockers.Count == 0)
+        {
+            return false;
+        }
+
+        var index = LazyInitializer.EnsureInitialized(ref _existingWorkDaysByAgent, BuildExistingWorkDaysIndex);
+        return index.TryGetValue(agentId, out var days) && days.Contains(date);
+    }
+
+    private Dictionary<string, HashSet<DateOnly>> BuildExistingWorkDaysIndex()
+    {
+        var index = new Dictionary<string, HashSet<DateOnly>>(StringComparer.Ordinal);
+        foreach (var work in ExistingWorkBlockers)
+        {
+            if (!index.TryGetValue(work.AgentId, out var days))
+            {
+                days = [];
+                index[work.AgentId] = days;
+            }
+
+            var lastDay = DateOnly.FromDateTime(work.EndAt);
+            for (var day = DateOnly.FromDateTime(work.StartAt); day <= lastDay; day = day.AddDays(1))
+            {
+                if (Occupies(work, day))
+                {
+                    days.Add(day);
+                }
+            }
+        }
+
+        return index;
+    }
+
+    private static bool Occupies(CoreExistingWorkBlocker work, DateOnly day)
+    {
+        var dayStart = day.ToDateTime(TimeOnly.MinValue);
+        return work.StartAt < dayStart.AddDays(1) && work.EndAt > dayStart;
     }
 
     private Dictionary<(string, DateOnly), bool> BuildWorksOnDateLookup()

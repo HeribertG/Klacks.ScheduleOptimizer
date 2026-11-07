@@ -25,6 +25,20 @@ namespace Klacks.ScheduleOptimizer.Constraints;
 public sealed class PlanConstraintChecker
 {
     public IReadOnlyList<ConstraintViolation> Check(IReadOnlyList<AssignmentView> assignments, CoreWizardContext context)
+        => Check(assignments, context, streakWorks: []);
+
+    /// <summary>
+    /// Same rule set, with works outside the plan that still count as worked days for MaxConsecutiveDays. Only the
+    /// Wizard-1 path passes them (the in-period existing works, owner decision 2026-11-07); on the bitmap paths
+    /// those works ARE the scored cells, so the plain overload above leaves them out.
+    /// </summary>
+    /// <param name="assignments">All non-free assignments of the plan being scored</param>
+    /// <param name="context">Aggregated scheduling context</param>
+    /// <param name="streakWorks">Works that extend a consecutive-day run without being plan assignments</param>
+    public IReadOnlyList<ConstraintViolation> Check(
+        IReadOnlyList<AssignmentView> assignments,
+        CoreWizardContext context,
+        IReadOnlyList<CoreExistingWorkBlocker> streakWorks)
     {
         var violations = new List<ConstraintViolation>();
         var eval = EvaluationContext.For(context);
@@ -37,7 +51,7 @@ public sealed class PlanConstraintChecker
         }
         CheckShiftBlacklist(assignments, eval, violations);
         CheckBreakBlocker(assignments, eval, violations);
-        CheckMaxConsecutiveDays(assignments, context, eval, violations);
+        CheckMaxConsecutiveDays(assignments, context, eval, streakWorks, violations);
         var externalIntervals = BuildExternalIntervalsByAgent(assignments, context);
         CheckMinPauseHours(assignments, context, eval, externalIntervals, violations);
         CheckOverlap(assignments, violations);
@@ -200,9 +214,25 @@ public sealed class PlanConstraintChecker
         }
     }
 
-    private static void CheckMaxConsecutiveDays(IReadOnlyList<AssignmentView> assignments, CoreWizardContext context, EvaluationContext eval, List<ConstraintViolation> violations)
+    /// <summary>
+    /// Flags every run of consecutive worked days longer than the agent's cap. The streak works fill days of the run
+    /// (by their start day, like the assignments) but a run is reported only when it holds a plan day: a chain made of
+    /// existing works alone is nothing the plan could change. The violation date is the run's first plan day so the
+    /// repair operators find a token to remove; without streak works that is the run start, as before, and no extra set
+    /// or lookup is built (Wizard-4/bitmap path). A run of existing works and
+    /// locked tokens only is still reported: a locked token is a plan assignment here (known, accepted).
+    /// </summary>
+    private static void CheckMaxConsecutiveDays(
+        IReadOnlyList<AssignmentView> assignments,
+        CoreWizardContext context,
+        EvaluationContext eval,
+        IReadOnlyList<CoreExistingWorkBlocker> streakWorks,
+        List<ConstraintViolation> violations)
     {
         var fallback = context.SchedulingMaxConsecutiveDays;
+        var streakDaysByAgent = streakWorks.Count == 0
+            ? null
+            : streakWorks.ToLookup(w => w.AgentId, w => w.Date, StringComparer.Ordinal);
 
         foreach (var perAgent in assignments.GroupBy(t => t.AgentId))
         {
@@ -214,7 +244,15 @@ public sealed class PlanConstraintChecker
                 continue;
             }
 
-            var workingDays = perAgent.Select(t => t.Date).Distinct().OrderBy(d => d).ToList();
+            HashSet<DateOnly>? planDays = null;
+            var days = perAgent.Select(t => t.Date);
+            if (streakDaysByAgent is not null)
+            {
+                planDays = days.ToHashSet();
+                days = planDays.Concat(streakDaysByAgent[perAgent.Key]);
+            }
+
+            var workingDays = days.Distinct().OrderBy(d => d).ToList();
             if (workingDays.Count == 0)
             {
                 continue;
@@ -222,38 +260,48 @@ public sealed class PlanConstraintChecker
 
             var runStart = workingDays[0];
             var runLength = 1;
+            DateOnly? firstPlanDay = IsPlanDay(planDays, runStart) ? runStart : null;
             for (var i = 1; i < workingDays.Count; i++)
             {
-                if (workingDays[i].DayNumber == workingDays[i - 1].DayNumber + 1)
+                var day = workingDays[i];
+                if (day.DayNumber == workingDays[i - 1].DayNumber + 1)
                 {
                     runLength++;
+                    if (firstPlanDay is null && IsPlanDay(planDays, day))
+                    {
+                        firstPlanDay = day;
+                    }
                 }
                 else
                 {
-                    if (runLength > cap)
-                    {
-                        violations.Add(new ConstraintViolation(
-                            ViolationKind.MaxConsecutiveDays,
-                            perAgent.Key,
-                            runStart,
-                            null,
-                            $"Agent has {runLength} consecutive days starting {runStart:yyyy-MM-dd}, cap is {cap}."));
-                    }
-                    runStart = workingDays[i];
+                    ReportOverlongRun(perAgent.Key, runStart, runLength, firstPlanDay, cap, violations);
+                    runStart = day;
                     runLength = 1;
+                    firstPlanDay = IsPlanDay(planDays, day) ? day : null;
                 }
             }
 
-            if (runLength > cap)
-            {
-                violations.Add(new ConstraintViolation(
-                    ViolationKind.MaxConsecutiveDays,
-                    perAgent.Key,
-                    runStart,
-                    null,
-                    $"Agent has {runLength} consecutive days starting {runStart:yyyy-MM-dd}, cap is {cap}."));
-            }
+            ReportOverlongRun(perAgent.Key, runStart, runLength, firstPlanDay, cap, violations);
         }
+    }
+
+    /// <summary>Without streak works every working day is a plan day, so no set is built on that path.</summary>
+    private static bool IsPlanDay(HashSet<DateOnly>? planDays, DateOnly day) => planDays is null || planDays.Contains(day);
+
+    private static void ReportOverlongRun(
+        string agentId, DateOnly runStart, int runLength, DateOnly? firstPlanDay, int cap, List<ConstraintViolation> violations)
+    {
+        if (runLength <= cap || firstPlanDay is null)
+        {
+            return;
+        }
+
+        violations.Add(new ConstraintViolation(
+            ViolationKind.MaxConsecutiveDays,
+            agentId,
+            firstPlanDay.Value,
+            null,
+            $"Agent has {runLength} consecutive days starting {runStart:yyyy-MM-dd}, cap is {cap}."));
     }
 
     private static void CheckMinPauseHours(
