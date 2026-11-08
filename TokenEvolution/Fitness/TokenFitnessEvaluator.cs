@@ -20,6 +20,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 /// <see cref="Models.KeywordMode.Soft"/> they rank right after coverage and before Stage 1, so a wish is broken only to
 /// cover a slot, never for guaranteed or target hours; in Hard mode (where a broken restriction already counts as a
 /// legality violation) they rank after Stage 1. Unfulfilled positive wishes rank after Stage 1 and before Stage 2 in both.
+/// The number of tokens held by stand-ins (placeholders) ranks right before Stage 1 (in Soft mode after the broken wish
+/// tiers): fewer wins, so a stand-in takes only a slot no real person can legally cover, while a stand-in still beats an
+/// open slot. Without stand-ins the count is 0 on every plan and the order is unchanged.
 /// </summary>
 /// <param name="constraintChecker">Hard-constraint checker supplying Stage-0</param>
 public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
@@ -27,6 +30,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     private readonly TokenConstraintChecker _constraintChecker;
     private readonly IReadOnlyDictionary<string, double> _maxPossiblePerAgent;
     private readonly IReadOnlyList<string> _agentsInPriorityOrder;
+    private readonly IReadOnlySet<string> _standInIds;
     private readonly object _kindEligibilityLock = new();
     private CoreWizardContext? _kindEligibilityContext;
     private IReadOnlyDictionary<int, IReadOnlyDictionary<string, int>>? _kindEligibleDays;
@@ -79,6 +83,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         _constraintChecker = constraintChecker;
         _maxPossiblePerAgent = maxPossiblePerAgent;
         _agentsInPriorityOrder = agentsInPriorityOrder.Select(a => a.Id).ToList();
+        _standInIds = agentsInPriorityOrder.Where(a => a.IsStandIn).Select(a => a.Id).ToHashSet(StringComparer.Ordinal);
     }
 
     public static TokenFitnessEvaluator Create(CoreWizardContext context, TokenEvolutionConfig? config = null)
@@ -112,6 +117,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         var (legality, total) = _constraintChecker.CountViolationsSplit(scenario, context);
         scenario.FitnessStage0Legality = legality;
         scenario.FitnessStage0 = total;
+        scenario.FitnessStandInTokens = CountStandInTokens(scenario);
         var (stage1Flags, stage1Completion) = ComputeStage1(scenario, context);
         scenario.FitnessStage1 = stage1Completion;
         scenario.FitnessKeywordWishes = ComputeKeywordWishes(scenario, context);
@@ -204,6 +210,12 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
             return broken;
         }
 
+        var standIns = x.FitnessStandInTokens.CompareTo(y.FitnessStandInTokens);
+        if (standIns != 0)
+        {
+            return standIns;
+        }
+
         var stage1 = y.FitnessStage1.CompareTo(x.FitnessStage1);
         if (stage1 != 0)
         {
@@ -272,6 +284,25 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         }
 
         return true;
+    }
+
+    private int CountStandInTokens(CoreScenario scenario)
+    {
+        if (_standInIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var token in scenario.Tokens)
+        {
+            if (_standInIds.Contains(token.AgentId))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private (IReadOnlyList<int> Flags, double CompletionRate) ComputeStage1(CoreScenario scenario, CoreWizardContext context)

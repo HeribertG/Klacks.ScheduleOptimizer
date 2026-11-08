@@ -42,6 +42,9 @@ public record CoreAgent(
     /// <summary>Soft target on minimum hours (Stage 4).</summary>
     public double MinimumHours { get; init; } = 0;
 
+    /// <summary>True for a placeholder (stand-in): it fills only what real people cannot (fitness: fewer stand-in tokens win right after legality, coverage and, in Soft keyword mode, the broken wishes).</summary>
+    public bool IsStandIn { get; init; }
+
     /// <summary>True if the agent participates in shift rotation. False = FD-only, no rotation.</summary>
     public bool PerformsShiftWork { get; init; } = true;
 

@@ -30,6 +30,13 @@ public class CoreScenario
     /// </summary>
     public int FitnessStage0Legality { get; set; }
 
+    /// <summary>
+    /// Tokens held by stand-ins (placeholders). Fewer is better, compared right before Stage 1: a stand-in fills only
+    /// what real people cannot, so no plan buys hours or soft goals by handing a coverable slot to a stand-in. Coverage
+    /// and legality rank above it, so a stand-in still beats an open slot. Always 0 without stand-ins.
+    /// </summary>
+    public int FitnessStandInTokens { get; set; }
+
     /// <summary>Stage 1: GuaranteedHours coverage top-down (0..1, higher is better).</summary>
     public double FitnessStage1 { get; set; }
 

@@ -15,6 +15,8 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// BreakBlocker, the shift-work flag (<see cref="ShiftWorkRule"/>, receiving side only), ClientShiftPreference
 /// Blacklist, MaxConsecutiveDays, MaxWeeklyHours,
 /// MinPauseHours and the weekly rest days of the schedule check (<see cref="BitmapWeeklyRestDayGuard"/>).
+/// Placeholder rule (<see cref="StandInWork"/>): a swap never hands a stand-in a work that a real person legally holds
+/// (<see cref="DiagnoseCellInPlace"/> passes); a work that breaks a rule where it stands may go to the stand-in.
 /// Operates on the bitmap directly without converting to tokens.
 /// Keyword wishes: in <see cref="KeywordMode.Hard"/> FREE and the OnlyX / NoX directives veto the receiving side; in
 /// <see cref="KeywordMode.Soft"/> they do not. In both modes a move is refused when it raises any keyword-wish tier of a
@@ -138,6 +140,12 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         var date = bitmap.Days[move.Day];
         var agentA = bitmap.Rows[move.RowA];
         var agentB = bitmap.Rows[move.RowB];
+
+        if (StandInWork.HandsRealWorkToStandIn(agentA, cellA, agentB, cellB)
+            && DiagnoseCellInPlace(bitmap, agentA.IsStandIn ? move.RowB : move.RowA, move.Day) is null)
+        {
+            return "move would hand a work a real person legally holds to a stand-in; stand-ins only fill what real people cannot";
+        }
 
         var sideA = DiagnoseReceivingSide(bitmap, move.RowA, agentA, date, cellB, "rowA");
         if (sideA is not null)

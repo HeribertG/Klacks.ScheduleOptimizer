@@ -241,13 +241,14 @@ public sealed class WishRepairSwap
 
     /// <summary>
     /// True when the candidate fulfils more positive wishes and is not worse anywhere else: legality, coverage (Stage 0),
-    /// broken wish tiers, guaranteed hours (Stage 1) and target hours (Stage 2). A move that only improves the hours is
+    /// stand-in tokens, broken wish tiers, guaranteed hours (Stage 1) and target hours (Stage 2). A move that only improves the hours is
     /// left to the hand-over passes, so this pass never trades a wish for anything.
     /// </summary>
     public static bool IsRepair(CoreScenario candidate, CoreScenario current)
         => candidate.FitnessKeywordWishes.Unfulfilled < current.FitnessKeywordWishes.Unfulfilled
             && candidate.FitnessStage0Legality <= current.FitnessStage0Legality
             && candidate.FitnessStage0 <= current.FitnessStage0
+            && candidate.FitnessStandInTokens <= current.FitnessStandInTokens
             && candidate.FitnessKeywordWishes.CompareBrokenTo(current.FitnessKeywordWishes) <= 0
             && candidate.FitnessStage1 >= current.FitnessStage1 - StageTolerance
             && candidate.FitnessStage2 >= current.FitnessStage2 - StageTolerance;

@@ -39,6 +39,9 @@ public static class RosterPositionBias
     /// candidates still below their guaranteed hours receive first (top roster position
     /// preferred); once every candidate is at or above target the surplus goes to the
     /// bottom of the roster, keeping the top accurate ("the bottom eats what is left").
+    /// Stand-ins (placeholders) receive only when no real person is among the candidates: they sit at the bottom of
+    /// the roster, so without this the surplus rule would hand them every slot the real people at their target could
+    /// still take.
     /// <para>
     /// The optional <paramref name="preferWhere"/> narrows the chosen accuracy group to the
     /// candidates it matches, when there are any — deliberately INSIDE the accuracy order, never
@@ -68,6 +71,15 @@ public static class RosterPositionBias
         Func<CoreAgent, bool>? preferWhere = null,
         bool balanceNightShare = false)
     {
+        if (candidates.Any(a => a.IsStandIn))
+        {
+            var realCandidates = candidates.Where(a => !a.IsStandIn).ToList();
+            if (realCandidates.Count > 0)
+            {
+                candidates = realCandidates;
+            }
+        }
+
         var hoursByAgent = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var token in assignedTokens)
         {

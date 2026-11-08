@@ -11,9 +11,11 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
 /// The first instance for a region rebuild: decides whether a rebuilt plan is ALLOWED, never whether it is better.
 /// A rebuilt plan is admitted only when (1) no locked cell moved, (2) every rebuilt row passes the end-state rule check
 /// (<see cref="PlanMutationValidator.DiagnoseRowRebuild"/>: day restrictions, eligibility, pauses, consecutive days,
-/// weekly hours, weekly rest days, hard planning rules), (3) the touched rows move no further from their target hours
-/// (<see cref="TargetHoursDeviationGuard"/>) and (4) the per-row harmony fitness does not fall below the floor.
-/// The constraint-agent committee is not consulted: its votes are soft hints, and (4) already rejects every rebuild
+/// weekly hours, weekly rest days, hard planning rules), (3) no stand-in receives a work a real person legally held
+/// (<see cref="StandInWork"/>), (4) the touched rows move no further from
+/// their target hours (<see cref="TargetHoursDeviationGuard"/>) and (5) the per-row harmony fitness does not fall below
+/// the floor.
+/// The constraint-agent committee is not consulted: its votes are soft hints, and (5) already rejects every rebuild
 /// the per-row score sees as worse.
 /// </summary>
 /// <param name="validator">Hard rule layer shared with the rest of Wizard 3.</param>
@@ -102,6 +104,11 @@ public sealed class RegionAdmission
             }
         }
 
+        if (HandsLegalRealWorkToStandIn(original, rebuilt))
+        {
+            return null;
+        }
+
         var deviationBefore = _targetHoursGuard.Capture(original, steps);
         if (_targetHoursGuard.Diagnose(rebuilt, deviationBefore) is not null)
         {
@@ -110,5 +117,46 @@ public sealed class RegionAdmission
 
         var fitness = Fitness(rebuilt);
         return fitness >= fitnessFloor - Epsilon ? fitness : null;
+    }
+
+    /// <summary>
+    /// True when a stand-in holds a work in <paramref name="rebuilt"/> that a real person legally held in
+    /// <paramref name="original"/>. A rebuild permutes the cells of a day among the rows and keeps their identity, so the
+    /// origin of a stand-in's new work is the row that held the same cell on that day. A work that broke a rule where it
+    /// stood may go to the stand-in.
+    /// </summary>
+    private bool HandsLegalRealWorkToStandIn(HarmonyBitmap original, HarmonyBitmap rebuilt)
+    {
+        for (var row = 0; row < rebuilt.RowCount; row++)
+        {
+            if (!rebuilt.Rows[row].IsStandIn)
+            {
+                continue;
+            }
+
+            for (var day = 0; day < rebuilt.DayCount; day++)
+            {
+                var cell = rebuilt.GetCell(row, day);
+                if (!StandInWork.IsWork(cell.Symbol) || ReferenceEquals(cell, original.GetCell(row, day)))
+                {
+                    continue;
+                }
+
+                for (var origin = 0; origin < original.RowCount; origin++)
+                {
+                    if (ReferenceEquals(original.GetCell(origin, day), cell))
+                    {
+                        if (!original.Rows[origin].IsStandIn && CellValid(original, origin, day))
+                        {
+                            return true;
+                        }
+
+                        break;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 }

@@ -652,6 +652,7 @@ public sealed class TokenEvolutionLoop
             Id = Guid.NewGuid().ToString(),
             Tokens = source.Tokens.ToList(),
             FitnessStage0 = source.FitnessStage0,
+            FitnessStandInTokens = source.FitnessStandInTokens,
             FitnessStage1 = source.FitnessStage1,
             FitnessKeywordWishes = source.FitnessKeywordWishes,
             FitnessStage2 = source.FitnessStage2,

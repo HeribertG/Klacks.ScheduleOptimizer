@@ -32,6 +32,9 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
 /// In <see cref="KeywordMode.Soft"/> one more rung follows, <see cref="SlotRelaxation.KeywordWishes"/>: a keyword wish
 /// breaks only where no wish-abiding fill (direct or relocated) exists, and of its direct candidates only those breaking
 /// the least severe wish stay (<see cref="KeywordWishCandidates"/>), before the hour-driven pick.
+/// Stand-ins (placeholders) join the ladder only after the real people have walked it up to the block-ideal rung
+/// (<see cref="LadderWalk"/>), so a stand-in takes only a slot no real person can take without breaking a hard rule or a
+/// keyword wish.
 /// </para>
 /// </summary>
 public sealed class TokenRepair : ITokenOperator
@@ -353,10 +356,12 @@ public sealed class TokenRepair : ITokenOperator
         List<CoreAgent> candidates = [];
         var reached = SlotRelaxation.None;
 
-        foreach (var rung in wizard.KeywordMode == KeywordMode.Soft ? SoftKeywordCoverageLadder : CoverageLadder)
+        var ladder = wizard.KeywordMode == KeywordMode.Soft ? SoftKeywordCoverageLadder : CoverageLadder;
+        foreach (var (rung, withStandIns) in LadderWalk(ladder, wizard.Agents.Any(agent => agent.IsStandIn)))
         {
             candidates = wizard.Agents
-                .Where(agent => !occupiedAgents.Contains(agent.Id)
+                .Where(agent => (withStandIns || !agent.IsStandIn)
+                    && !occupiedAgents.Contains(agent.Id)
                     && SlotConstraintFilter.IsValidAssignment(
                         agent, violation.Date.Value, shiftTypeIndex, violation.ShiftRefId.Value, slotHours,
                         wizard, primary.Tokens, slotStartUtc, slotEndUtc, rung))
@@ -371,7 +376,7 @@ public sealed class TokenRepair : ITokenOperator
             if (TryRelocateAndFill(
                     primary, wizard, violation.ShiftRefId.Value, violation.Date.Value,
                     shiftTypeIndex, slotHours, slotStartUtc, slotEndUtc, occupiedAgents,
-                    rung, escalations, out repaired))
+                    rung, withStandIns, escalations, out repaired))
             {
                 return true;
             }
@@ -444,6 +449,29 @@ public sealed class TokenRepair : ITokenOperator
             .Concat(group.Where(a => !ExtendsAPackage(a, date, tokens, wizard)));
 
     /// <summary>
+    /// Rungs of the coverage ladder in walk order, each with whether stand-ins (placeholders) may take the slot. With
+    /// stand-ins in the roster the real people walk the ladder first, up to the block-ideal rung, and only then the whole
+    /// roster walks it again: a real person goes past the soft MaxWorkDays ideal before a stand-in takes a slot, while
+    /// the keyword rung stays behind the stand-ins (a stand-in comes before a broken keyword wish). Without stand-ins the
+    /// walk is the ladder itself.
+    /// </summary>
+    private static IEnumerable<(SlotRelaxation Rung, bool WithStandIns)> LadderWalk(SlotRelaxation[] ladder, bool hasStandIns)
+    {
+        if (hasStandIns)
+        {
+            foreach (var rung in ladder.Where(rung => rung != SlotRelaxation.KeywordWishes))
+            {
+                yield return (rung, false);
+            }
+        }
+
+        foreach (var rung in ladder)
+        {
+            yield return (rung, true);
+        }
+    }
+
+    /// <summary>
     /// One-move escape for a slot no agent can take directly: an agent that fails only because of one
     /// of its own neighbouring shifts hands that shift to another agent and then takes the open slot.
     /// Deterministic and random-free — agents in roster order, blocker candidates are the outer edge
@@ -463,6 +491,7 @@ public sealed class TokenRepair : ITokenOperator
         DateTime slotEndUtc,
         IReadOnlySet<string> occupiedAgents,
         SlotRelaxation relaxation,
+        bool withStandIns,
         Action<string>? escalations,
         out CoreScenario repaired)
     {
@@ -475,7 +504,7 @@ public sealed class TokenRepair : ITokenOperator
             : wizard.Agents;
         foreach (var agent in agents)
         {
-            if (occupiedAgents.Contains(agent.Id))
+            if (occupiedAgents.Contains(agent.Id) || (agent.IsStandIn && !withStandIns))
             {
                 continue;
             }
@@ -709,13 +738,17 @@ public sealed class TokenRepair : ITokenOperator
         }
 
         surplus.Reverse();
+        var realSurplus = surplus.Where(a => !a.IsStandIn).ToList();
+        var standInSurplus = surplus.Where(a => a.IsStandIn).ToList();
 
         // Package-aware receiver order (SPEC.md decision 13): inside each accuracy group an agent
         // whose own shift starts next to the relocated day is tried first — the handed-over shift
         // then extends one of their packages instead of opening a new one-day block. The accuracy
-        // order itself is untouched; rule 5 stays above the package preference.
+        // order itself is untouched; rule 5 stays above the package preference. Stand-ins come
+        // after every real receiver.
         foreach (var candidate in PreferExtenders(below, blocker.Date, stateTokens, wizard)
-                     .Concat(PreferExtenders(surplus, blocker.Date, stateTokens, wizard)))
+                     .Concat(PreferExtenders(realSurplus, blocker.Date, stateTokens, wizard))
+                     .Concat(PreferExtenders(standInSurplus, blocker.Date, stateTokens, wizard)))
         {
             if (SlotConstraintFilter.IsValidAssignment(
                     candidate, blocker.Date, blocker.ShiftTypeIndex, blocker.ShiftRefId,
