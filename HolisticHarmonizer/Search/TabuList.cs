@@ -10,7 +10,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// cells on the same day right after the swap is the exact reverse move, so a key stays forbidden for
 /// <c>tenure</c> iterations after it was applied. The optimizer only applies the ban to non-improving moves
 /// (aspiration criterion): once other moves touched the same cells, the coordinates describe a new move. Keys use
-/// the reject-memory form <see cref="ForbiddenSwapKey"/>. Only same-day swaps are recorded:
+/// the canonical form <see cref="ForbiddenSwapKey"/>. Only same-day swaps are recorded:
 /// the key drops DayB, and a cross-day swap must not ban an unrelated same-day candidate.
 /// </summary>
 /// <param name="tenure">Number of iterations a key stays tabu; 0 disables the list.</param>

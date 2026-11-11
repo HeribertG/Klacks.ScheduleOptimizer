@@ -14,7 +14,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee;
 /// </summary>
 public interface IConstraintAgent
 {
-    /// <summary>Stable identifier surfaced in reject-memory entries. Must not be null or empty.</summary>
+    /// <summary>Stable identifier surfaced in rejection details. Must not be null or empty.</summary>
     string Name { get; }
 
     /// <summary>

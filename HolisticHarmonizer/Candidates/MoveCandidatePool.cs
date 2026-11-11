@@ -13,8 +13,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Candidates;
 /// through the hard-constraint <see cref="PlanMutationValidator"/>, deduplicates symmetric
 /// pairs (rowA/rowB swappable, day equal), sorts by descending expected benefit, and trims
 /// to the configured Top-K. Soft layers (committee + score-greedy) are intentionally NOT
-/// applied — those still run when the LLM emits a candidate, so applying them here would
-/// be redundant and would also discard valid tal-Schritt candidates the LLM may want to
+/// applied — those still run when a candidate is evaluated as a batch, so applying them here would
+/// be redundant and would also discard valid tal-Schritt candidates the search may want to
 /// combine with other moves.
 /// </summary>
 /// <param name="validator">Hard-constraint validator (locks, bounds, no-op, cross-day coverage).</param>
@@ -49,8 +49,7 @@ public sealed class MoveCandidatePool
     /// Returns the pre-validated, ranked, capped candidate list for the supplied intent. The
     /// list may be empty when no structural opportunity exists or when every raw suggestion
     /// fails hard validation. Same-day candidates whose canonical key is in <paramref name="excluded"/>
-    /// are dropped before ranking, so swaps the reject memory already saw fail (hard violation,
-    /// committee veto or score regression) are not offered again.
+    /// are dropped before ranking, so swaps the caller has marked as forbidden are not offered again.
     /// </summary>
     /// <param name="bitmap">Current working bitmap.</param>
     /// <param name="intent">Focused intent whose generator is used.</param>

@@ -119,8 +119,8 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     /// <summary>
     /// Returns null if the move is valid, otherwise a short human-readable explanation
     /// naming the violated constraint and the specific values involved (run length,
-    /// pause hours, weekly hours, etc.). Used by Wizard 3 to feed structured rejections
-    /// back to the LLM through <c>RejectMemory</c>.
+    /// pause hours, weekly hours, etc.). Used by Wizard 3 to report structured rejections
+    /// of a proposed swap.
     /// </summary>
     public string? Diagnose(HarmonyBitmap bitmap, ReplaceMove move)
     {

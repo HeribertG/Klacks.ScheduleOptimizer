@@ -3,11 +3,9 @@
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
 
 /// <summary>
-/// Catalog of intents the LLM may attach to a proposed mutation batch. Each intent represents
-/// a distinct optimization angle — different goal text and different success heuristics. The
-/// engine picks one intent per iteration via <c>RouletteIntentSelector</c> and tells the LLM
-/// to focus on that intent for the next batch proposal. The LLM is still allowed to emit
-/// other intents, but the selected one steers the goal section of the prompt.
+/// Catalog of the stage-3 move intents. Each intent represents a distinct optimization angle with
+/// its own candidate generator; the deterministic search collects the candidates of all intents
+/// per iteration and labels each evaluated batch with the intent it came from.
 /// </summary>
 public static class HolisticIntent
 {
@@ -20,7 +18,7 @@ public static class HolisticIntent
     /// <summary>Move work from over-worked employees to under-worked ones — equalize target-hours deviation.</summary>
     public const string RedistributeLoad = "redistribute_load";
 
-    /// <summary>All known intents. Order is the default committee/prompt order.</summary>
+    /// <summary>All known intents, in candidate collection order.</summary>
     public static readonly IReadOnlyList<string> All = new[]
     {
         ConsolidateBlock,

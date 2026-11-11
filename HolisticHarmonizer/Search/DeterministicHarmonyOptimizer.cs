@@ -16,7 +16,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// Deterministic stage-3 optimizer (no LLM): best-improvement local search over the
 /// <see cref="MoveCandidatePool"/> neighbourhood. Per iteration it evaluates every single candidate of all three
 /// intents and every pair among the best <see cref="DeterministicSearchOptions.PairPoolCap"/> singles through the
-/// same <see cref="BatchEvaluator"/> the LLM path uses (hard validator + committee + score-greedy), then applies
+/// <see cref="BatchEvaluator"/> acceptance stack (hard validator + committee + score-greedy), then applies
 /// the best batch. A batch is only applied when the evaluator accepts it, so the score never drops; equal-score
 /// (sideways) moves are allowed and the <see cref="TabuList"/> keeps them from being undone (aspiration: a tabu
 /// move is still taken when it strictly improves, because after other moves the same coordinates are no longer
@@ -34,7 +34,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// before the wall-clock safety budget. Same input and seed give the same output unless the wall-clock budget
 /// hits. Trial evaluations run on the working bitmap and are reverted (a swap is its own inverse).
 /// </summary>
-/// <param name="evaluator">Acceptance stack shared with the LLM path.</param>
+/// <param name="evaluator">Acceptance stack (hard validator + committee + score-greedy).</param>
 /// <param name="pool">Untrimmed candidate pool (topPerIntent = int.MaxValue in production).</param>
 /// <param name="fitness">Fitness evaluator used for the start score; must be the one inside <paramref name="evaluator"/>.</param>
 /// <param name="options">Limits, pair cap, tabu tenure and seed.</param>

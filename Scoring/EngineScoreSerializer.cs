@@ -136,7 +136,7 @@ public static class EngineScoreSerializer
     /// <summary>
     /// Builds the <c>holistic</c> (Wizard 3) snapshot JSON. Uses the same real HarmonyScorer component
     /// breakdown as the harmonizer tag because Wizard 3 optimises the same bitmap representation with the
-    /// same scorer. Wizard 3 runs an LLM inner-loop rather than an evolution config, so no <c>config</c>
+    /// same scorer. Wizard 3 runs a deterministic local search rather than an evolution config, so no <c>config</c>
     /// block is emitted (its run parameters are not a HarmonizerEvolutionConfig — a deliberate signal gap
     /// rather than fabricated values).
     /// </summary>

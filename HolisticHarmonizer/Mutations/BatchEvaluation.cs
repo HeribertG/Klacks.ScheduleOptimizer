@@ -4,9 +4,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
 /// Result of evaluating a single <see cref="MutationBatch"/> against the working bitmap.
-/// Carries everything the inner loop needs: which steps survived, why others did not, the
-/// score delta, and where the batch broke off — used to build reject-memory feedback for
-/// the next LLM call.
+/// Carries everything the search needs: which steps survived, why others did not, the
+/// score delta, and where the batch broke off.
 /// </summary>
 /// <param name="BatchId">The evaluated batch's id (matches <see cref="MutationBatch.BatchId"/>).</param>
 /// <param name="Intent">Intent label copied from the batch for logging convenience.</param>

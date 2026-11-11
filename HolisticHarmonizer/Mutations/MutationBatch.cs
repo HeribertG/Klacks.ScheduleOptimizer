@@ -8,7 +8,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 /// rather than per-step, so the LLM can suggest holistic moves where intermediate steps
 /// would temporarily worsen the score but the final state improves it.
 /// </summary>
-/// <param name="BatchId">Stable identifier for logging and reject-memory correlation.</param>
+/// <param name="BatchId">Stable identifier for logging and correlation.</param>
 /// <param name="Intent">Short label the LLM attaches to the batch (e.g. "consolidate_block")
 /// so we can track which intents work and feed adaptive operator selection later.</param>
 /// <param name="LlmIteration">Inner-loop iteration the batch was generated in (zero-based).</param>

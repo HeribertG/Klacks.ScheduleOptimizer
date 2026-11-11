@@ -3,7 +3,7 @@
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Loop;
 
 /// <summary>
-/// Per-iteration progress snapshot emitted by <c>HolisticHarmonizerEngine</c>. Decoupled from any
+/// Per-iteration progress snapshot emitted by the deterministic Holistic Harmonizer search. Decoupled from any
 /// transport layer — consumers (e.g. SignalR runner) translate this into wire DTOs.
 /// </summary>
 /// <param name="IterationIndex">Zero-based index of the just-completed inner-loop iteration.</param>

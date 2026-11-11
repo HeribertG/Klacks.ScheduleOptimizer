@@ -15,8 +15,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// Composition root of the stage-3 acceptance stack built from one <see cref="BitmapInput"/>: hard validator,
 /// five-agent committee, target-hours guard, score-greedy batch evaluator and the candidate pool over the
 /// three intent generators.
-/// The deterministic engine, the LLM engine and the harmonizer eval runner all build through here, so every
-/// mode judges moves identically. Callers must score with <see cref="Fitness"/> (the evaluator the acceptance
+/// Every stage-3 caller builds through here, so every
+/// caller judges moves identically. Callers must score with <see cref="Fitness"/> (the evaluator the acceptance
 /// stack uses), never with the evaluator they passed in, so a later wrapper around it reaches every caller.
 /// Planning rules (BitmapInput.Rules) hook in here only: hard rules into the validator (same-day and cross-day),
 /// soft rules as <see cref="RuleAwareBitmapFitnessEvaluator"/> AROUND the passed evaluator (outside its row memo),
@@ -38,7 +38,7 @@ public sealed record HolisticHarmonizerComponents(
     public const int UntrimmedPool = int.MaxValue;
 
     /// <param name="input">Schedule context (availability, boundary assignments, eligibility, time windows).</param>
-    /// <param name="fitness">Base fitness evaluator (memoized in the deterministic mode, plain in the LLM paths).</param>
+    /// <param name="fitness">Base fitness evaluator (memoized in the deterministic mode).</param>
     /// <param name="topPerIntent">Per-intent cap of the candidate pool; int.MaxValue keeps it untrimmed.</param>
     /// <param name="softPenaltyWeight">lambda of the soft planning-rule term (only used when the input has a soft rule).</param>
     public static HolisticHarmonizerComponents Build(

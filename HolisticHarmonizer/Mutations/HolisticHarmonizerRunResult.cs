@@ -7,34 +7,23 @@ using Klacks.ScheduleOptimizer.Harmonizer.Rules;
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
-/// Outcome of a single Holistic Harmonizer inner-loop run. Carries the full iteration history so the UI
-/// can show what the LLM tried, what was accepted, what was rejected, and how the score
-/// trajectory progressed.
+/// Outcome of a single Holistic Harmonizer run of the deterministic search. Carries the applied batches so the UI
+/// can show what was accepted and how the score progressed.
 /// </summary>
 /// <param name="OriginalBitmap">The bitmap as loaded from the schedule (post-RowSorter).</param>
 /// <param name="FinalBitmap">The bitmap after all accepted batches were applied.</param>
-/// <param name="Iterations">Every batch the LLM proposed across the inner loop, in evaluation
-/// order, with full acceptance metadata (score delta, applied steps, rejections, intent).</param>
+/// <param name="Iterations">The applied batches in evaluation order, with full acceptance metadata
+/// (score delta, applied steps, rejections, intent).</param>
 /// <param name="FitnessBefore">Global harmony fitness of OriginalBitmap (0..1).</param>
-/// <param name="FitnessAfter">Global harmony fitness of FinalBitmap (0..1). Score-Greedy
-/// guarantees this is at least <see cref="FitnessBefore"/>.</param>
-/// <param name="LlmModelId">The LLM model id that produced the proposals.</param>
-/// <param name="LlmParsingError">Non-null when the last LLM response could not be parsed;
-/// UI should surface this so the operator can pick a different model.</param>
-/// <param name="LlmRawResponsePreview">First ~600 chars of the last raw LLM response when
-/// parsing failed; null otherwise.</param>
-/// <param name="AbortedOnUnusableResponses">Set when the inner loop stopped because the model produced
-/// several consecutive unusable responses, or because the pre-flight capability check failed.</param>
+/// <param name="FitnessAfter">Global harmony fitness of FinalBitmap (0..1).</param>
+/// <param name="LlmModelId">Label of the engine that produced the result (historic name, kept for the wire contract).</param>
 public sealed record HolisticHarmonizerRunResult(
     HarmonyBitmap OriginalBitmap,
     HarmonyBitmap FinalBitmap,
     IReadOnlyList<BatchEvaluation> Iterations,
     double FitnessBefore,
     double FitnessAfter,
-    string LlmModelId,
-    string? LlmParsingError,
-    string? LlmRawResponsePreview,
-    bool AbortedOnUnusableResponses = false)
+    string LlmModelId)
 {
     /// <summary>
     /// Approved hard planning constraints that were skipped because their stored parameters are invalid; the
