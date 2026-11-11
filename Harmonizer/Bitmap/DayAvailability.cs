@@ -11,13 +11,16 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// <param name="ForbiddenSymbol">When set, the cell symbol on this date must not equal this symbol (NoEarly/NoLate/NoNight keywords)</param>
 /// <param name="Keywords">The day's schedule commands as a keyword-wish day (restriction tier and positive wish); null when the
 /// day has none or the caller does not supply them. Read by the keyword-wish move guard of the replace validator.</param>
+/// <param name="MaxDailyHours">Maximum daily hours of the contract valid on this day (Wizard 1's contract-day override);
+/// 0 = the agent's cap (<see cref="BitmapAgent.MaxDailyHours"/>) applies</param>
 public sealed record DayAvailability(
     bool WorksOnDay,
     bool HasFreeCommand,
     bool HasBreakBlocker,
     CellSymbol? RequiredSymbol = null,
     CellSymbol? ForbiddenSymbol = null,
-    KeywordDay? Keywords = null)
+    KeywordDay? Keywords = null,
+    decimal MaxDailyHours = 0m)
 {
     public static readonly DayAvailability AlwaysAvailable = new(true, false, false);
 

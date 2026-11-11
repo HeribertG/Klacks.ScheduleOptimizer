@@ -56,9 +56,10 @@ public sealed class CompositeObjective
                     over++;
                     break;
                 default:
-                    // The ten legality kinds: MaxConsecutiveDays, MinPauseHours, MaxDailyHours,
+                    // The twelve legality kinds: MaxConsecutiveDays, MinPauseHours, MaxDailyHours,
                     // WorkOnDayViolation, PerformsShiftWorkViolation, PerDayKeywordViolation,
-                    // BreakBlockerViolation, MaximumHoursExceeded, Overlap, ExistingWorkOverlap.
+                    // BreakBlockerViolation, MaximumHoursExceeded, Overlap, ExistingWorkOverlap,
+                    // ShiftBlacklistViolation, MaxWeeklyHours.
                     legality++;
                     break;
             }

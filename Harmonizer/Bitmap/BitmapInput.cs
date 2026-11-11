@@ -34,6 +34,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// How the run treats the restricting schedule commands: Hard (default) vetoes them, Soft lets a move through as long as
 /// it raises no keyword-wish tier of the row. Positive wishes are guarded in both modes.
 /// </param>
+/// <param name="KeepAgentOrder">
+/// True when <paramref name="Agents"/> already holds the roster priority order (the API ranks once for every wizard
+/// stage); the row sorter then only moves the stand-ins last and keeps the rest. False (default) lets the row sorter rank.
+/// </param>
 public sealed record BitmapInput(
     IReadOnlyList<BitmapAgent> Agents,
     DateOnly StartDate,
@@ -45,4 +49,5 @@ public sealed record BitmapInput(
     IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? IneligibleAssignments = null,
     IReadOnlyList<CoreRestrictedTimeWindow>? RestrictedTimeWindows = null,
     BitmapPlanningRules? Rules = null,
-    KeywordMode KeywordMode = KeywordMode.Hard);
+    KeywordMode KeywordMode = KeywordMode.Hard,
+    bool KeepAgentOrder = false);

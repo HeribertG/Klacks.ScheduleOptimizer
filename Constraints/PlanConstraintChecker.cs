@@ -1,5 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
+using Klacks.ScheduleOptimizer.Common.RestDays;
+using Klacks.ScheduleOptimizer.Common.WeeklyHours;
 using Klacks.ScheduleOptimizer.Models;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
@@ -28,13 +30,13 @@ public sealed class PlanConstraintChecker
         => Check(assignments, context, streakWorks: []);
 
     /// <summary>
-    /// Same rule set, with works outside the plan that still count as worked days for MaxConsecutiveDays. Only the
-    /// Wizard-1 path passes them (the in-period existing works, owner decision 2026-11-07); on the bitmap paths
-    /// those works ARE the scored cells, so the plain overload above leaves them out.
+    /// Same rule set, with works outside the plan that still count as worked days for MaxConsecutiveDays and with their
+    /// hours for MaxWeeklyHours. Only the Wizard-1 path passes them (the in-period existing works, owner decision
+    /// 2026-11-07); on the bitmap paths those works ARE the scored cells, so the plain overload above leaves them out.
     /// </summary>
     /// <param name="assignments">All non-free assignments of the plan being scored</param>
     /// <param name="context">Aggregated scheduling context</param>
-    /// <param name="streakWorks">Works that extend a consecutive-day run without being plan assignments</param>
+    /// <param name="streakWorks">Works that extend a consecutive-day run and add weekly hours without being plan assignments</param>
     public IReadOnlyList<ConstraintViolation> Check(
         IReadOnlyList<AssignmentView> assignments,
         CoreWizardContext context,
@@ -57,6 +59,7 @@ public sealed class PlanConstraintChecker
         CheckOverlap(assignments, violations);
         CheckExistingWorkOverlap(assignments, externalIntervals, violations);
         CheckMaxDailyHours(assignments, context, eval, violations);
+        CheckMaxWeeklyHours(assignments, context, eval, streakWorks, violations);
         CheckMaximumHoursExceeded(assignments, eval, violations);
         CheckQualificationMismatch(assignments, context, violations);
         CheckSlotSupply(assignments, context, eval, violations);
@@ -593,6 +596,82 @@ public sealed class PlanConstraintChecker
         }
 
         return context.SchedulingMaxDailyHours;
+    }
+
+    /// <summary>
+    /// Flags every ISO calendar week in which an agent's paid hours exceed the weekly cap (<see cref="WeeklyHoursGuard.CapOf"/>).
+    /// Weeks come from the plan assignments, so only a week holding a plan assignment is reported; the streak works and
+    /// the boundary works (<see cref="WeeklyHoursGuard.WorksOutsidePlan"/>) add their hours to it. Bitmap break cells are no
+    /// assignments, so breaks never count. The violation date is the week's first unlocked assignment (otherwise its first
+    /// assignment), so the repair operators find a token of that week to remove.
+    /// </summary>
+    private static void CheckMaxWeeklyHours(
+        IReadOnlyList<AssignmentView> assignments,
+        CoreWizardContext context,
+        EvaluationContext eval,
+        IReadOnlyList<CoreExistingWorkBlocker> streakWorks,
+        List<ConstraintViolation> violations)
+    {
+        var outsideHours = OutsidePlanHoursByWeek(streakWorks, context);
+        foreach (var perAgent in assignments.GroupBy(a => a.AgentId))
+        {
+            var cap = eval.AgentsById.TryGetValue(perAgent.Key, out var agent)
+                ? WeeklyHoursGuard.CapOf(agent, context)
+                : context.SchedulingMaxWeeklyHours;
+            if (cap <= 0)
+            {
+                continue;
+            }
+
+            foreach (var week in perAgent.GroupBy(a => CalendarWeekRestDays.WeekStartOf(a.Date)))
+            {
+                var hours = week.Sum(a => a.TotalHours) + outsideHours.GetValueOrDefault((perAgent.Key, week.Key));
+                if (!CalendarWeekHours.Exceeds(hours, (decimal)cap))
+                {
+                    continue;
+                }
+
+                violations.Add(new ConstraintViolation(
+                    ViolationKind.MaxWeeklyHours,
+                    perAgent.Key,
+                    AnchorDayOf(week),
+                    null,
+                    FormattableString.Invariant($"Agent {perAgent.Key} has {hours}h in the calendar week starting {week.Key:yyyy-MM-dd}, cap is {cap}h.")));
+            }
+        }
+    }
+
+    private static Dictionary<(string AgentId, DateOnly WeekStart), decimal> OutsidePlanHoursByWeek(
+        IReadOnlyList<CoreExistingWorkBlocker> streakWorks, CoreWizardContext context)
+    {
+        var result = new Dictionary<(string AgentId, DateOnly WeekStart), decimal>();
+        foreach (var work in WeeklyHoursGuard.WorksOutsidePlan(streakWorks, context))
+        {
+            var key = (work.AgentId, CalendarWeekRestDays.WeekStartOf(work.Date));
+            result[key] = result.GetValueOrDefault(key) + work.Hours;
+        }
+
+        return result;
+    }
+
+    private static DateOnly AnchorDayOf(IEnumerable<AssignmentView> week)
+    {
+        DateOnly? first = null;
+        DateOnly? firstUnlocked = null;
+        foreach (var assignment in week)
+        {
+            if (first is null || assignment.Date < first)
+            {
+                first = assignment.Date;
+            }
+
+            if (!assignment.IsLocked && (firstUnlocked is null || assignment.Date < firstUnlocked))
+            {
+                firstUnlocked = assignment.Date;
+            }
+        }
+
+        return firstUnlocked ?? first!.Value;
     }
 
     private static void CheckMaximumHoursExceeded(IReadOnlyList<AssignmentView> assignments, EvaluationContext eval, List<ConstraintViolation> violations)

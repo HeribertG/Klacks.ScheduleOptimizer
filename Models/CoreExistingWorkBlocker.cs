@@ -5,7 +5,8 @@
 /// blocks any auction slot that overlaps with its time span. Without this veto, the Wizard
 /// could award an early shift to an agent that already has a late shift on the same day in
 /// the database. Wizard 1 also counts it as a worked day for the minimum pause, the weekly rest days and the
-/// MaxConsecutiveDays cap (a night work occupies its start and its end day there); the bitmap engines do not, because
+/// MaxConsecutiveDays cap (a night work occupies its start and its end day there), and with its <see cref="Hours"/>
+/// toward the maximum weekly hours of the calendar week of <paramref name="Date"/>; the bitmap engines do not, because
 /// for them the existing works are the scored cells.
 /// </summary>
 /// <param name="AgentId">Client identifier the work belongs to</param>
@@ -19,4 +20,11 @@ public record CoreExistingWorkBlocker(
     string AgentId,
     DateOnly Date,
     DateTime StartAt,
-    DateTime EndAt);
+    DateTime EndAt)
+{
+    /// <summary>
+    /// Paid hours the work counts toward the maximum weekly hours (Work.WorkTime; for the substitute of a replacement the
+    /// replaced hours; 0 for a container child of the agent's own container). Default 0 = counts no hours.
+    /// </summary>
+    public decimal Hours { get; init; }
+}

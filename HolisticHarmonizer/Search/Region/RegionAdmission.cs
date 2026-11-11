@@ -11,7 +11,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
 /// The first instance for a region rebuild: decides whether a rebuilt plan is ALLOWED, never whether it is better.
 /// A rebuilt plan is admitted only when (1) no locked cell moved, (2) every rebuilt row passes the end-state rule check
 /// (<see cref="PlanMutationValidator.DiagnoseRowRebuild"/>: day restrictions, eligibility, pauses, consecutive days,
-/// weekly hours, weekly rest days, hard planning rules), (3) no stand-in receives a work a real person legally held
+/// daily and weekly hours, weekly rest days, hard planning rules), (3) no stand-in receives a work a real person legally held
 /// (<see cref="StandInWork"/>), (4) the touched rows move no further from
 /// their target hours (<see cref="TargetHoursDeviationGuard"/>) and (5) the per-row harmony fitness does not fall below
 /// the floor.

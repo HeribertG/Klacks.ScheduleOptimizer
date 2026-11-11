@@ -17,6 +17,8 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// <param name="WorkloadPercent">Employment level in percent for pro-rata planning rules; null = full time</param>
 /// <param name="PerformsShiftWork">Shift-work flag of the contract or the settings defaults; false = the agent may only receive early duties</param>
 /// <param name="IsStandIn">True for a placeholder (stand-in) that is filled only after every real person</param>
+/// <param name="MaxDailyHours">Maximum paid hours per day from the planning contract (Wizard 1's agent cap); 0 = unconstrained.
+/// A contract value of the day (<see cref="DayAvailability.MaxDailyHours"/>) overrides it, as in Wizard 1</param>
 public sealed record BitmapAgent(
     string Id,
     string DisplayName,
@@ -30,4 +32,5 @@ public sealed record BitmapAgent(
     CoreNightWindow? NightWindow = null,
     decimal? WorkloadPercent = null,
     bool PerformsShiftWork = true,
-    bool IsStandIn = false);
+    bool IsStandIn = false,
+    decimal MaxDailyHours = 0m);

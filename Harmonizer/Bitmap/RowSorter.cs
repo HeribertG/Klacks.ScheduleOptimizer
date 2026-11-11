@@ -7,17 +7,26 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// so a stand-in is filled last even against a real person with zero target hours. Then: target hours descending.
 /// Tiebreaker: count of cells whose symbol is in the agent's preferred set, descending. Final
 /// tiebreaker: agent id (stable, deterministic).
+/// With keepIncomingOrder the caller has already ranked the rows (BitmapInput.KeepAgentOrder): only the stand-ins move
+/// behind every real person, otherwise the incoming row order is kept (stable).
 /// </summary>
 public static class RowSorter
 {
-    public static HarmonyBitmap Sort(HarmonyBitmap bitmap)
+    public static HarmonyBitmap Sort(HarmonyBitmap bitmap, bool keepIncomingOrder = false)
     {
-        var permutation = ComputePermutation(bitmap);
+        var permutation = ComputePermutation(bitmap, keepIncomingOrder);
         return bitmap.WithRowOrder(permutation);
     }
 
-    public static IReadOnlyList<int> ComputePermutation(HarmonyBitmap bitmap)
+    public static IReadOnlyList<int> ComputePermutation(HarmonyBitmap bitmap, bool keepIncomingOrder = false)
     {
+        if (keepIncomingOrder)
+        {
+            return Enumerable.Range(0, bitmap.RowCount)
+                .OrderBy(r => bitmap.Rows[r].IsStandIn)
+                .ToArray();
+        }
+
         var keys = new RowKey[bitmap.RowCount];
         for (var r = 0; r < bitmap.RowCount; r++)
         {

@@ -57,8 +57,8 @@ public sealed class FuzzyBiddingAgent : IBiddingAgent
 
         var blockMaturity = effectiveBlockLength;
 
-        var weeklyCap = agent.MaxWeeklyHours > 0 ? agent.MaxWeeklyHours : 50.0;
-        var weeklyLoad = (agent.CurrentHours + state.HoursAssignedThisRun) / weeklyCap;
+        var weeklyCap = WeeklyHoursGuard.CapOf(agent, context);
+        var weeklyLoad = weeklyCap > 0 ? (agent.CurrentHours + state.HoursAssignedThisRun) / weeklyCap : 0.0;
 
         var indexBonus = ResolveIndexBonus(agent, context);
 

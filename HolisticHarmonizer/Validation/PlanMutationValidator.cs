@@ -2,6 +2,7 @@
 
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Conductor;
+using Klacks.ScheduleOptimizer.Harmonizer.Evolution;
 using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 using Klacks.ScheduleOptimizer.Models;
 
@@ -13,11 +14,11 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// Cross-day swaps (DayA != DayB) are admitted when coverage-neutral — i.e. both cells share the
 /// same work-or-free state so the daily head-count on each affected day stays unchanged. Availability, the
 /// schedule-command directives, the shift-work flag and the shift blacklist are enforced hard on both receiving sides. The weekly
-/// rest days of the schedule check are enforced hard on both receiving rows of a cross-day swap. The
-/// remaining per-row constraint checks (max-consec, min-pause) for cross-day are delegated to the
-/// constraint-agent committee plus score-greedy because <c>DomainAwareReplaceValidator</c> is
-/// scoped to single-day swaps; this is an explicit trade-off documented in the spec. Hard planning rules
-/// (BitmapInput.Rules) are enforced on both paths: same-day inside the domain validator, cross-day here.
+/// rest days of the schedule check are enforced hard on both receiving rows of a cross-day swap. The per-row rules of the
+/// same-day path - minimum pause, maximum consecutive days, maximum daily hours and maximum weekly hours - are enforced hard on the end state
+/// of a cross-day swap (applied to a copy, both receiving cells judged in place by the domain validator), so a cross-day
+/// swap is held to the same hard rules as a same-day swap. Hard planning rules (BitmapInput.Rules) are enforced on both
+/// paths: same-day inside the domain validator, cross-day here.
 /// </summary>
 public sealed class PlanMutationValidator
 {
@@ -137,6 +138,12 @@ public sealed class PlanMutationValidator
             {
                 return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, planningRuleIssue);
             }
+
+            var endStateIssue = DiagnoseCrossDayEndState(bitmap, swap);
+            if (endStateIssue is not null)
+            {
+                return new PlanMutationRejection(swap, PlanMutationRejectionReason.HardConstraintViolation, endStateIssue);
+            }
         }
 
         if (!crossDay)
@@ -170,6 +177,21 @@ public sealed class PlanMutationValidator
 
         return _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowA, agentA, swap.DayA, cellB, "rowA")
             ?? _domainValidator.DiagnoseWeeklyRestDays(bitmap, swap.RowB, agentB, swap.DayB, cellA, "rowB");
+    }
+
+    /// <summary>
+    /// Per-row rules of the same-day path on the end state of a cross-day swap: the swap is applied to a copy (which
+    /// re-anchors both moved cells on their target day) and both receiving cells are judged in place with
+    /// <see cref="DomainAwareReplaceValidator.DiagnoseCellInPlace"/> - minimum pause to both neighbours, maximum consecutive
+    /// days, maximum daily hours and maximum weekly hours, boundary days included. The two cells are the only ones that change, so judging them
+    /// covers the whole swap, also when both belong to one row.
+    /// </summary>
+    private string? DiagnoseCrossDayEndState(HarmonyBitmap bitmap, PlanCellSwap swap)
+    {
+        var probe = BitmapCloner.Clone(bitmap);
+        Apply(probe, swap);
+        return _domainValidator.DiagnoseCellInPlace(probe, swap.RowA, swap.DayA)
+            ?? _domainValidator.DiagnoseCellInPlace(probe, swap.RowB, swap.DayB);
     }
 
     /// <summary>
@@ -253,6 +275,14 @@ public sealed class PlanMutationValidator
     public string? DiagnoseCellInPlace(HarmonyBitmap bitmap, int row, int day)
         => _domainValidator.DiagnoseCellInPlace(bitmap, row, day);
 
+    /// <summary>
+    /// Swaps the two cells. A cross-day swap moves each cell's <see cref="Cell.StartAt"/> / <see cref="Cell.EndAt"/> by the
+    /// day difference so the cell keeps its time of day on its new day; unset times (free and break cells) stay unset.
+    /// Applying the same swap again restores the original cells exactly, which is how every caller rolls a step back. A
+    /// same-day swap keeps the cell instances unchanged.
+    /// </summary>
+    /// <param name="bitmap">The plan to mutate in place.</param>
+    /// <param name="swap">The two cells to exchange.</param>
     public static void Apply(HarmonyBitmap bitmap, PlanCellSwap swap)
     {
         ArgumentNullException.ThrowIfNull(bitmap);
@@ -260,8 +290,23 @@ public sealed class PlanMutationValidator
 
         var cellA = bitmap.GetCell(swap.RowA, swap.DayA);
         var cellB = bitmap.GetCell(swap.RowB, swap.DayB);
-        bitmap.SetCell(swap.RowA, swap.DayA, cellB);
-        bitmap.SetCell(swap.RowB, swap.DayB, cellA);
+        var dayShift = bitmap.Days[swap.DayA].DayNumber - bitmap.Days[swap.DayB].DayNumber;
+        bitmap.SetCell(swap.RowA, swap.DayA, ShiftedByDays(cellB, dayShift));
+        bitmap.SetCell(swap.RowB, swap.DayB, ShiftedByDays(cellA, -dayShift));
+    }
+
+    private static Cell ShiftedByDays(Cell cell, int days)
+    {
+        if (days == 0 || (cell.StartAt == default && cell.EndAt == default))
+        {
+            return cell;
+        }
+
+        return cell with
+        {
+            StartAt = cell.StartAt == default ? default : cell.StartAt.AddDays(days),
+            EndAt = cell.EndAt == default ? default : cell.EndAt.AddDays(days),
+        };
     }
 
     private static bool IsInBounds(HarmonyBitmap bitmap, PlanCellSwap swap)

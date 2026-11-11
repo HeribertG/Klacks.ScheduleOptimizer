@@ -1,10 +1,12 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using System.Globalization;
+using Klacks.ScheduleOptimizer.Common.WeeklyHours;
 using Klacks.ScheduleOptimizer.Constraints.Keywords;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 using Klacks.ScheduleOptimizer.Harmonizer.Rules;
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 using Klacks.ScheduleOptimizer.TokenEvolution.Initialization;
 
 namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
@@ -13,7 +15,7 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// Hybrid validator that combines bitmap-local checks (locks, indices, self-swap) with
 /// hard domain constraints lifted from Wizard 1: contract WorksOnDay, FREE-Keyword,
 /// BreakBlocker, the shift-work flag (<see cref="ShiftWorkRule"/>, receiving side only), ClientShiftPreference
-/// Blacklist, MaxConsecutiveDays, MaxWeeklyHours,
+/// Blacklist, MaxConsecutiveDays, MaxDailyHours (<see cref="DiagnoseMaxDailyHours"/>), MaxWeeklyHours,
 /// MinPauseHours and the weekly rest days of the schedule check (<see cref="BitmapWeeklyRestDayGuard"/>).
 /// Placeholder rule (<see cref="StandInWork"/>): a swap never hands a stand-in a work that a real person legally holds
 /// (<see cref="DiagnoseCellInPlace"/> passes); a work that breaks a rule where it stands may go to the stand-in.
@@ -43,6 +45,9 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
 {
     /// <summary>Reason of a refused duty for an agent without shift work: {0} role label, {1} agent name, {2} symbol.</summary>
     public const string NoShiftWorkReasonFormat = "{0} {1} does not perform shift work; only early duties allowed ({2})";
+
+    /// <summary>Reason of a refused duty over the daily cap: {0} rule name, {1} day hours, {2} date, {3} cap.</summary>
+    public const string MaxDailyHoursReasonFormat = "{0} exceeded: day total would be {1:F1}h on {2:yyyy-MM-dd}, cap is {3}h";
 
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
     private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
@@ -200,7 +205,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     /// <summary>
     /// End-state check of one cell as it stands in <paramref name="bitmap"/>: the same domain rules a receiving side
     /// of a same-day swap must satisfy (day restrictions, eligibility, minimum pause to both neighbours, maximum
-    /// consecutive days, maximum weekly hours), evaluated against the row's current neighbours. Used by Wizard 3's
+    /// consecutive days, maximum daily hours, maximum weekly hours), evaluated against the row's current neighbours. Used by Wizard 3's
     /// region rebuild, which rearranges several cells at once and therefore cannot validate step by step. A free cell is
     /// always valid. Weekly rest days and planning rules are not part of this check: both compare a plan with the plan
     /// before the change, which a cell standing in place does not have; see <see cref="DiagnoseRowRebuild"/>.
@@ -350,6 +355,12 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         if (consecIssue is not null)
         {
             return $"{roleLabel} {receivingAgent.DisplayName}: {consecIssue}";
+        }
+
+        var dailyIssue = DiagnoseMaxDailyHours(receivingAgent, date, incomingCell);
+        if (dailyIssue is not null)
+        {
+            return $"{roleLabel} {receivingAgent.DisplayName}: {dailyIssue}";
         }
 
         var weeklyIssue = DiagnoseMaxWeeklyHours(bitmap, receivingRow, receivingAgent, date, dayIndex, incomingCell);
@@ -674,6 +685,31 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         return symbol != CellSymbol.Free && symbol != CellSymbol.Break;
     }
 
+    /// <summary>
+    /// Wizard 1's daily cap (Stage0HardConstraintChecker / SlotConstraintFilter ExceedsDailyHours): the paid hours the
+    /// agent holds on the day must not exceed the contract value of the day, otherwise the agent's cap; zero means
+    /// unconstrained. A row holds one cell per day and BitmapBuilder sums every work of the day into it, so the day total
+    /// after the move is the incoming cell's hours. A free or break cell never counts, like absences in Wizard 1.
+    /// </summary>
+    private string? DiagnoseMaxDailyHours(BitmapAgent receivingAgent, DateOnly date, Cell incomingCell)
+    {
+        if (!IsWorkingDayCell(incomingCell.Symbol))
+        {
+            return null;
+        }
+
+        var cap = _availability.TryGetValue((receivingAgent.Id, date), out var availability) && availability.MaxDailyHours > 0
+            ? availability.MaxDailyHours
+            : receivingAgent.MaxDailyHours;
+        if (cap <= 0 || incomingCell.Hours <= cap)
+        {
+            return null;
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture, MaxDailyHoursReasonFormat, Stage0RuleNames.MaxDailyHours, incomingCell.Hours, date, cap);
+    }
+
     private string? DiagnoseMaxWeeklyHours(
         HarmonyBitmap bitmap,
         int receivingRow,
@@ -687,7 +723,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             return null;
         }
 
-        var targetWeek = WeekOf(date);
+        var targetWeek = CalendarWeekHours.WeekOf(date);
         var totalHours = incomingCell.Hours;
 
         for (var d = 0; d < bitmap.DayCount; d++)
@@ -696,7 +732,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             {
                 continue;
             }
-            if (WeekOf(bitmap.Days[d]) != targetWeek)
+            if (CalendarWeekHours.WeekOf(bitmap.Days[d]) != targetWeek)
             {
                 continue;
             }
@@ -714,7 +750,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         // Break), so Break hours never count toward the weekly cap, matching the in-bitmap rule.
         totalHours += BoundaryHoursInWeek(receivingAgent.Id, targetWeek, bitmap.Days[0], bitmap.Days[^1]);
 
-        if (totalHours > receivingAgent.MaxWeeklyHours)
+        if (CalendarWeekHours.Exceeds(totalHours, receivingAgent.MaxWeeklyHours))
         {
             return $"MaxWeeklyHours exceeded: week total would be {totalHours:F1}h, cap is {receivingAgent.MaxWeeklyHours}h";
         }
@@ -725,7 +761,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     /// Sums the working hours of boundary assignments that fall in <paramref name="targetWeek"/> but
     /// on days strictly outside the bitmap range. Mirrors the boundary awareness of the MinPause and
     /// MaxConsecutiveDays checks. A full week (7 days) on each side is scanned, which the
-    /// ContextDaysBefore/After window (>= 14 days) always covers; <see cref="WeekOf"/> filters to the
+    /// ContextDaysBefore/After window (>= 14 days) always covers; <see cref="CalendarWeekHours.WeekOf"/> filters to the
     /// exact ISO week so it stays consistent with the in-bitmap summation above.
     /// </summary>
     private decimal BoundaryHoursInWeek(string agentId, (int Year, int Week) targetWeek, DateOnly firstDay, DateOnly lastDay)
@@ -734,7 +770,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         for (var i = 1; i <= 6; i++)
         {
             var before = firstDay.AddDays(-i);
-            if (WeekOf(before) == targetWeek
+            if (CalendarWeekHours.WeekOf(before) == targetWeek
                 && TryGetBoundaryAssignment(agentId, before, out var b)
                 && IsWorkingAssignment(b))
             {
@@ -742,7 +778,7 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             }
 
             var after = lastDay.AddDays(i);
-            if (WeekOf(after) == targetWeek
+            if (CalendarWeekHours.WeekOf(after) == targetWeek
                 && TryGetBoundaryAssignment(agentId, after, out var a)
                 && IsWorkingAssignment(a))
             {
@@ -750,11 +786,5 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             }
         }
         return hours;
-    }
-
-    private static (int Year, int Week) WeekOf(DateOnly date)
-    {
-        var dt = date.ToDateTime(TimeOnly.MinValue);
-        return (ISOWeek.GetYear(dt), ISOWeek.GetWeekOfYear(dt));
     }
 }

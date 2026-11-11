@@ -16,6 +16,7 @@ public static class SlotConstraintFilter
     /// True if the given agent may receive a token for the slot (date + shift-type) given the context.
     /// Considers: weekday (WorkOnXxx), shift-work flag, break blockers, per-day keywords,
     /// per-agent MaximumHours, per-day MaxDailyHours (contract override or per-agent cap),
+    /// per-agent MaxWeeklyHours per ISO calendar week (<see cref="WeeklyHoursGuard"/>, same group as the daily cap),
     /// per-agent MinPauseHours (incl. cross-day overnight gaps), block-length and rest-day rules.
     /// The optional slot interval enables the MinPauseHours check; pass null for keyword-only seeds.
     /// <paramref name="relaxation"/> selects the rung of the coverage escalation:
@@ -56,6 +57,11 @@ public static class SlotConstraintFilter
         }
 
         if (ExceedsDailyHours(agent, date, slotHours, context, alreadyAssigned))
+        {
+            return false;
+        }
+
+        if (WeeklyHoursGuard.Violates(agent, date, slotHours, alreadyAssigned, context))
         {
             return false;
         }

@@ -23,4 +23,5 @@ public enum ViolationKind
     Overlap,
     ExistingWorkOverlap,
     ShiftBlacklistViolation,
+    MaxWeeklyHours,
 }

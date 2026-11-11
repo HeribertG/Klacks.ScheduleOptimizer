@@ -21,6 +21,7 @@ public static class Stage0RuleNames
     public const string MissingQualification = "MissingQualification";
     public const string MaximumHoursContractCap = "MaximumHoursContractCap";
     public const string MaxDailyHours = "MaxDailyHours";
+    public const string MaxWeeklyHours = "MaxWeeklyHours";
     public const string OverlappingShift = "OverlappingShift";
     public const string ExistingWorkOverlap = "ExistingWorkOverlap";
     public const string MinPauseHours = "MinPauseHours";

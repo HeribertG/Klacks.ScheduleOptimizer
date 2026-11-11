@@ -8,7 +8,8 @@ namespace Klacks.ScheduleOptimizer.TokenEvolution.Auction.Controller;
 /// <summary>
 /// Stage 0 — Tabu. These rules can NEVER be broken: availability, contract weekday,
 /// the keyword restrictions (FREE, OnlyX, NoX) in <see cref="KeywordMode.Hard"/> only - in Soft mode they move to
-/// <see cref="Stage1SoftConstraintChecker"/>, MaxDailyHours (per-agent), MinPauseHours (per-agent), MaxConsecutiveDays
+/// <see cref="Stage1SoftConstraintChecker"/>, MaxDailyHours (per-agent), MaxWeeklyHours (per-agent, ISO calendar week,
+/// <see cref="WeeklyHoursGuard"/>), MinPauseHours (per-agent), MaxConsecutiveDays
 /// (per-agent hard cap on block length, unlocked existing works in the period included), double-booking (incl. cross-day overnight overlap),
 /// existing-work overlap, the weekly rest days of the schedule check (<see cref="WeeklyRestDayGuard"/>).
 /// If all candidates fail here for a slot, the slot stays unassigned
@@ -201,6 +202,12 @@ public sealed class Stage0HardConstraintChecker
             var cap = ResolveDailyCap(agent, date.Value, context);
             return new VetoVerdict(0, Stage0RuleNames.MaxDailyHours,
                 $"Agent {agent.Id} would exceed daily-hours cap of {cap}h on {date.Value:yyyy-MM-dd}.");
+        }
+
+        if (WeeklyHoursGuard.Violates(agent, date.Value, slotHours, alreadyAssigned, context))
+        {
+            return new VetoVerdict(0, Stage0RuleNames.MaxWeeklyHours,
+                FormattableString.Invariant($"Agent {agent.Id} would exceed weekly-hours cap of {WeeklyHoursGuard.CapOf(agent, context)}h in the calendar week of {date.Value:yyyy-MM-dd}."));
         }
 
         if (HasOverlappingShift(agent.Id, slot, date.Value, alreadyAssigned))

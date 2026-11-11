@@ -45,7 +45,8 @@ public class CoreWizardContext
 
     /// <summary>
     /// Unlocked existing Works in the period (incl. the substitute of a replacement); never lifted into the genome.
-    /// Wizard 1 counts them for overlap, minimum pause, weekly rest days and the MaxConsecutiveDays cap.
+    /// Wizard 1 counts them for overlap, minimum pause, weekly rest days, the MaxConsecutiveDays cap and, with their
+    /// hours, the maximum weekly hours.
     /// </summary>
     public IReadOnlyList<CoreExistingWorkBlocker> ExistingWorkBlockers { get; init; } = [];
 
