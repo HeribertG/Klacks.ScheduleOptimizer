@@ -24,4 +24,7 @@ public enum PlanMutationRejectionReason : byte
 
     /// <summary>The batch would move the touched rows further away from their target hours (stage 3 must not).</summary>
     TargetHoursWorsened = 5,
+
+    /// <summary>The batch would break the stage-3 protection (rank hours, packages, rests, mixed packages).</summary>
+    ProtectionBroken = 6,
 }

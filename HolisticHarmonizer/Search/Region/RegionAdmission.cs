@@ -13,14 +13,15 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
 /// (<see cref="PlanMutationValidator.DiagnoseRowRebuild"/>: day restrictions, eligibility, pauses, consecutive days,
 /// daily and weekly hours, weekly rest days, hard planning rules), (3) no stand-in receives a work a real person legally held
 /// (<see cref="StandInWork"/>), (4) the touched rows move no further from
-/// their target hours (<see cref="TargetHoursDeviationGuard"/>) and (5) the per-row harmony fitness does not fall below
-/// the floor.
-/// The constraint-agent committee is not consulted: its votes are soft hints, and (5) already rejects every rebuild
+/// their target hours (<see cref="TargetHoursDeviationGuard"/>), (5) the touched rows keep the stage-3 protection
+/// (<see cref="BundleProtection"/>) and (6) the per-row harmony fitness does not fall below the floor.
+/// The constraint-agent committee is not consulted: its votes are soft hints, and (6) already rejects every rebuild
 /// the per-row score sees as worse.
 /// </summary>
 /// <param name="validator">Hard rule layer shared with the rest of Wizard 3.</param>
 /// <param name="fitness">Per-row harmony fitness used by the acceptance stack.</param>
 /// <param name="targetHoursGuard">Guard against moving rows away from their target hours.</param>
+/// <param name="protection">Stage-3 protection a rebuilt plan must also pass; null leaves it out.</param>
 public sealed class RegionAdmission
 {
     private const double Epsilon = 1e-9;
@@ -28,12 +29,18 @@ public sealed class RegionAdmission
     private readonly PlanMutationValidator _validator;
     private readonly IBitmapFitnessEvaluator _fitness;
     private readonly TargetHoursDeviationGuard _targetHoursGuard;
+    private readonly BundleProtection? _protection;
 
-    public RegionAdmission(PlanMutationValidator validator, IBitmapFitnessEvaluator fitness, TargetHoursDeviationGuard targetHoursGuard)
+    public RegionAdmission(
+        PlanMutationValidator validator,
+        IBitmapFitnessEvaluator fitness,
+        TargetHoursDeviationGuard targetHoursGuard,
+        BundleProtection? protection = null)
     {
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _fitness = fitness ?? throw new ArgumentNullException(nameof(fitness));
         _targetHoursGuard = targetHoursGuard ?? throw new ArgumentNullException(nameof(targetHoursGuard));
+        _protection = protection;
     }
 
     /// <summary>Per-row harmony fitness of a plan (the score the floor refers to).</summary>
@@ -62,6 +69,22 @@ public sealed class RegionAdmission
         var unchanged = ReferenceEquals(rebuilt.GetCell(row, day), original.GetCell(row, day));
         return !unchanged || CellValid(original, row, day);
     }
+
+    /// <summary>Measures <paramref name="rows"/> of the plan before a rebuild for <see cref="KeepsProtection"/>; null without a protection.</summary>
+    /// <param name="original">The plan before the rebuild.</param>
+    /// <param name="rows">Rows the rebuild may change.</param>
+    public PlanProtectionSnapshot? CaptureProtection(HarmonyBitmap original, IEnumerable<int> rows)
+        => _protection?.Capture(original, rows);
+
+    /// <summary>
+    /// True when <paramref name="rebuilt"/> keeps the stage-3 protection against the rows measured before the rebuild;
+    /// always true without a protection. Lets the region rebuild drop refused states before it picks the states it
+    /// keeps, instead of finding out only in <see cref="Admit"/>.
+    /// </summary>
+    /// <param name="rebuilt">The plan after the rebuild.</param>
+    /// <param name="before">Measurement taken by <see cref="CaptureProtection"/>.</param>
+    public bool KeepsProtection(HarmonyBitmap rebuilt, PlanProtectionSnapshot? before)
+        => _protection is null || before is null || _protection.Diagnose(rebuilt, before) is null;
 
     /// <summary>
     /// Returns the fitness of <paramref name="rebuilt"/> when it is admitted against <paramref name="original"/>,
@@ -111,6 +134,11 @@ public sealed class RegionAdmission
 
         var deviationBefore = _targetHoursGuard.Capture(original, steps);
         if (_targetHoursGuard.Diagnose(rebuilt, deviationBefore) is not null)
+        {
+            return null;
+        }
+
+        if (_protection is not null && _protection.Diagnose(rebuilt, _protection.Capture(original, steps)) is not null)
         {
             return null;
         }

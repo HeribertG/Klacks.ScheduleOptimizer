@@ -24,12 +24,16 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Validation;
 /// <param name="targetHoursGuard">Optional guard checked on the applied prefix before the score: when the
 /// touched rows would move away from their target hours the prefix is reverted and the batch is
 /// <see cref="BatchAcceptance.Rejected"/> with reason <see cref="PlanMutationRejectionReason.TargetHoursWorsened"/>.</param>
+/// <param name="protection">Optional stage-3 protection checked on the applied prefix after the target-hours guard: a
+/// refused prefix is reverted and the batch is <see cref="BatchAcceptance.Rejected"/> with reason
+/// <see cref="PlanMutationRejectionReason.ProtectionBroken"/>. HolisticHarmonizerComponents.Build always wires it.</param>
 public sealed class BatchEvaluator
 {
     private readonly PlanMutationValidator _mutationValidator;
     private readonly IBitmapFitnessEvaluator _fitnessEvaluator;
     private readonly ConstraintAgentCommittee? _committee;
     private readonly TargetHoursDeviationGuard? _targetHoursGuard;
+    private readonly BundleProtection? _protection;
 
     public BatchEvaluator(PlanMutationValidator mutationValidator, IBitmapFitnessEvaluator fitnessEvaluator)
         : this(mutationValidator, fitnessEvaluator, committee: null)
@@ -40,12 +44,14 @@ public sealed class BatchEvaluator
         PlanMutationValidator mutationValidator,
         IBitmapFitnessEvaluator fitnessEvaluator,
         ConstraintAgentCommittee? committee,
-        TargetHoursDeviationGuard? targetHoursGuard = null)
+        TargetHoursDeviationGuard? targetHoursGuard = null,
+        BundleProtection? protection = null)
     {
         _mutationValidator = mutationValidator;
         _fitnessEvaluator = fitnessEvaluator;
         _committee = committee;
         _targetHoursGuard = targetHoursGuard;
+        _protection = protection;
     }
 
     public BatchEvaluation Evaluate(HarmonyBitmap workingBitmap, MutationBatch batch)
@@ -55,6 +61,7 @@ public sealed class BatchEvaluator
 
         var scoreBefore = _fitnessEvaluator.Evaluate(workingBitmap).Fitness;
         var deviationBefore = _targetHoursGuard?.Capture(workingBitmap, batch.Steps);
+        var shapeBefore = _protection?.Capture(workingBitmap, batch.Steps);
 
         var appliedSteps = new List<PlanCellSwap>(batch.Steps.Count);
         var rejections = new List<PlanMutationRejection>();
@@ -104,6 +111,21 @@ public sealed class BatchEvaluator
         {
             RevertPrefix(workingBitmap, appliedSteps);
             rejections.Add(new PlanMutationRejection(appliedSteps[^1], PlanMutationRejectionReason.TargetHoursWorsened, worsened));
+            return new BatchEvaluation(
+                batch.BatchId,
+                batch.Intent,
+                BatchAcceptance.Rejected,
+                AppliedSteps: [],
+                Rejections: rejections,
+                StoppedAtStep: stoppedAtStep ?? appliedSteps.Count - 1,
+                ScoreBefore: scoreBefore,
+                ScoreAfter: scoreBefore);
+        }
+
+        if (_protection is not null && _protection.Diagnose(workingBitmap, shapeBefore!) is { } unprotected)
+        {
+            RevertPrefix(workingBitmap, appliedSteps);
+            rejections.Add(new PlanMutationRejection(appliedSteps[^1], PlanMutationRejectionReason.ProtectionBroken, unprotected));
             return new BatchEvaluation(
                 batch.BatchId,
                 batch.Intent,

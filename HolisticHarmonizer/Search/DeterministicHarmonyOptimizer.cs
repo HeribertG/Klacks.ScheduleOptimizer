@@ -40,6 +40,9 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// <param name="timeProvider">Clock for the wall-clock budget; null uses the system clock.</param>
 /// <param name="sameDayValidator">Hard validator for the optional exhaustive same-day neighbourhood
 /// (<see cref="DeterministicSearchOptions.IncludeAllSameDaySwaps"/>); required only when that option is on.</param>
+/// <param name="protection">Stage-3 protection handed to the region rebuild; it must be the one inside
+/// <paramref name="evaluator"/>, so both phases refuse the same plans. The components constructor passes the one
+/// <see cref="HolisticHarmonizerComponents.Build"/> wired.</param>
 public sealed class DeterministicHarmonyOptimizer
 {
     private const double ImprovementEpsilon = 1e-9;
@@ -55,6 +58,7 @@ public sealed class DeterministicHarmonyOptimizer
     private readonly DeterministicSearchOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly PlanMutationValidator? _sameDayValidator;
+    private readonly BundleProtection? _protection;
     private readonly GlobalHarmonyEvaluator _harmony = new();
 
     /// <summary>
@@ -72,7 +76,8 @@ public sealed class DeterministicHarmonyOptimizer
             components.Fitness,
             options,
             timeProvider,
-            components.Validator)
+            components.Validator,
+            components.Protection)
     {
     }
 
@@ -82,7 +87,8 @@ public sealed class DeterministicHarmonyOptimizer
         IBitmapFitnessEvaluator fitness,
         DeterministicSearchOptions options,
         TimeProvider? timeProvider = null,
-        PlanMutationValidator? sameDayValidator = null)
+        PlanMutationValidator? sameDayValidator = null,
+        BundleProtection? protection = null)
     {
         ArgumentNullException.ThrowIfNull(evaluator);
         ArgumentNullException.ThrowIfNull(pool);
@@ -106,6 +112,7 @@ public sealed class DeterministicHarmonyOptimizer
         _fitness = fitness;
         _options = options;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _protection = protection;
     }
 
     public DeterministicSearchResult Run(
@@ -247,7 +254,7 @@ public sealed class DeterministicHarmonyOptimizer
             return null;
         }
 
-        var admission = new RegionAdmission(_sameDayValidator, _fitness, new TargetHoursDeviationGuard());
+        var admission = new RegionAdmission(_sameDayValidator, _fitness, new TargetHoursDeviationGuard(), _protection);
         var phase = new RegionRebuildPhase(admission, _harmony, regionOptions, _timeProvider);
         return phase.Run(working, cancellationToken);
     }
@@ -287,7 +294,7 @@ public sealed class DeterministicHarmonyOptimizer
                 break;
             }
 
-            var evaluation = _evaluator.Evaluate(working, best with { BatchId = run.NextBatchId(), LlmIteration = iter });
+            var evaluation = _evaluator.Evaluate(working, best with { BatchId = run.NextBatchId(), Iteration = iter });
             run.Evaluations++;
             if (evaluation.Result != BatchAcceptance.Accepted)
             {
@@ -532,7 +539,7 @@ public sealed class DeterministicHarmonyOptimizer
     }
 
     private static MutationBatch BuildBatch(params IntentSwap[] steps)
-        => new(Guid.Empty, steps[0].Intent, LlmIteration: 0, Steps: steps.Select(s => s.Swap).ToArray());
+        => new(Guid.Empty, steps[0].Intent, Iteration: 0, Steps: steps.Select(s => s.Swap).ToArray());
 
     /// <summary>One tick per finished pass: the progress bar counts passes (restarts), not inner iterations.</summary>
     private void Report(IProgress<HolisticHarmonizerProgress>? progress, int passesDone, double bestFitness, int applied, long startTimestamp)

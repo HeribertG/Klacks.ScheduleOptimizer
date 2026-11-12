@@ -11,11 +11,11 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 /// <param name="BatchId">Stable identifier for logging and correlation.</param>
 /// <param name="Intent">Label of the candidate generator the batch came from (e.g. "consolidate_block"),
 /// see <see cref="HolisticIntent"/>.</param>
-/// <param name="LlmIteration">Search iteration the batch was generated in (zero-based).</param>
+/// <param name="Iteration">Search iteration the batch was generated in (zero-based).</param>
 /// <param name="Steps">Ordered list of swaps. Order matters — evaluation applies them in sequence
 /// and may keep a valid prefix if a later step fails.</param>
 public sealed record MutationBatch(
     Guid BatchId,
     string Intent,
-    int LlmIteration,
+    int Iteration,
     IReadOnlyList<PlanCellSwap> Steps);

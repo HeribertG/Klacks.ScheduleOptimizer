@@ -13,8 +13,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 
 /// <summary>
 /// Composition root of the stage-3 acceptance stack built from one <see cref="BitmapInput"/>: hard validator,
-/// five-agent committee, target-hours guard, score-greedy batch evaluator and the candidate pool over the
-/// three intent generators.
+/// five-agent committee, target-hours guard, stage-3 protection (<see cref="BundleProtection"/>), score-greedy batch
+/// evaluator and the candidate pool over the three intent generators.
 /// Every stage-3 caller builds through here, so every
 /// caller judges moves identically. Callers must score with <see cref="Fitness"/> (the evaluator the acceptance
 /// stack uses), never with the evaluator they passed in, so a later wrapper around it reaches every caller.
@@ -26,12 +26,14 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search;
 /// <param name="Evaluator">Hard validator + committee + score-greedy.</param>
 /// <param name="Pool">Candidate pool (same-day swaps of all three intents).</param>
 /// <param name="Fitness">Fitness evaluator used inside <paramref name="Evaluator"/>.</param>
+/// <param name="Protection">Stage-3 protection the evaluator applies; the optimizer hands it to the region rebuild.</param>
 /// <param name="Rules">Planning-rule state of the run; null when the input carries no planning rule.</param>
 public sealed record HolisticHarmonizerComponents(
     PlanMutationValidator Validator,
     BatchEvaluator Evaluator,
     MoveCandidatePool Pool,
     IBitmapFitnessEvaluator Fitness,
+    BundleProtection Protection,
     BitmapRuleRuntime? Rules = null)
 {
     /// <summary>Pool cap that keeps every validated candidate (the deterministic search ranks them itself).</summary>
@@ -72,7 +74,8 @@ public sealed record HolisticHarmonizerComponents(
         var effectiveFitness = rules is { HasSoftRules: true }
             ? new RuleAwareBitmapFitnessEvaluator(fitness, rules, softPenaltyWeight)
             : fitness;
-        var evaluator = new BatchEvaluator(validator, effectiveFitness, committee, new TargetHoursDeviationGuard());
-        return new HolisticHarmonizerComponents(validator, evaluator, pool, effectiveFitness, rules);
+        var protection = new BundleProtection(PeriodCarryIn.Of(input.BoundaryAssignments, input.StartDate));
+        var evaluator = new BatchEvaluator(validator, effectiveFitness, committee, new TargetHoursDeviationGuard(), protection);
+        return new HolisticHarmonizerComponents(validator, evaluator, pool, effectiveFitness, protection, rules);
     }
 }

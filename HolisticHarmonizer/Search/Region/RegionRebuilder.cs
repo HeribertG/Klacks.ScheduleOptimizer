@@ -10,7 +10,10 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Search.Region;
 /// <summary>
 /// Rebuilds one region by a beam search over its days: on each day the unlocked cells of the region rows are permuted
 /// among those rows (locked cells stay where they are), so every day keeps exactly its cells and the coverage is
-/// untouched. States are ranked by per-row fitness plus global harmony; each finished state then has to pass
+/// untouched. States are ranked by per-row fitness plus global harmony; on the last day of the region the states that
+/// break the stage-3 protection (<see cref="RegionAdmission.KeepsProtection"/>) are dropped before the beam is cut, so a
+/// protected state is not pushed out by a higher-ranked one that would be refused anyway. Partial states are not judged
+/// by the protection (a row can lose a cell on one day and win it back on the next). Each finished state then has to pass
 /// <see cref="RegionAdmission"/> (first instance) and raise the global harmony (second instance). The best admitted
 /// state is returned as a <see cref="RegionCandidate"/>, or null when no rebuild is admitted.
 /// <para>
@@ -61,6 +64,7 @@ public sealed class RegionRebuilder
         ArgumentNullException.ThrowIfNull(region);
 
         var rows = region.Rows;
+        var protectionBefore = _admission.CaptureProtection(baseBitmap, rows);
         var beam = new List<BeamState> { new(BitmapCloner.Clone(baseBitmap), baseRhythm.Clone(), 0d) };
         for (var day = region.DayFrom; day <= region.DayTo; day++)
         {
@@ -102,7 +106,12 @@ public sealed class RegionRebuilder
                 return null;
             }
 
-            beam = next.OrderByDescending(s => s.Rank).Take(_beamWidth).ToList();
+            var ranked = next.OrderByDescending(s => s.Rank);
+            beam = (day == region.DayTo
+                    ? ranked.Where(s => _admission.KeepsProtection(s.Bitmap, protectionBefore))
+                    : ranked)
+                .Take(_beamWidth)
+                .ToList();
         }
 
         RegionCandidate? best = null;
