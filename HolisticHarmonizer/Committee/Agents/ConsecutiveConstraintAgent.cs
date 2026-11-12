@@ -9,7 +9,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee.Agents;
 /// <summary>
 /// Vetoes swaps that push either row to its <c>MaxConsecutiveDays</c> contractual cap. The
 /// hard-validator already rejects runs that exceed the cap; this agent goes one step further
-/// and discourages reaching the cap exactly, so the LLM aims for shorter, sustainable streaks.
+/// and discourages reaching the cap exactly, so the search favours shorter, sustainable streaks.
 /// Approves when the swap shortens an existing long run (length above <c>MaxConsecutiveDays - 1</c>).
 /// Abstains when neither row has a max-consec contract value (0 = unconstrained) or when the
 /// swap is outside any work run.

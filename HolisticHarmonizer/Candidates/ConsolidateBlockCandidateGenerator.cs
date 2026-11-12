@@ -2,7 +2,7 @@
 
 using System.Globalization;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
-using Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Candidates;
 

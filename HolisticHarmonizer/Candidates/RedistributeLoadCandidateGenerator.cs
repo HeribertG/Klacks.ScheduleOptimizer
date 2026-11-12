@@ -2,7 +2,7 @@
 
 using System.Globalization;
 using Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
-using Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
+using Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Candidates;
 
@@ -18,7 +18,7 @@ public sealed class RedistributeLoadCandidateGenerator : IMoveCandidateGenerator
     /// <summary>
     /// Minimum absolute hours-deviation a row must show before it qualifies as over- or under-target.
     /// Set low (0.1h) so that plans already close to optimum still surface a few candidates rather
-    /// than handing the LLM an empty list that nudges it toward hallucinating its own coordinates.
+    /// than leaving the search without load moves.
     /// </summary>
     private const decimal DeviationFloor = 0.1m;
 

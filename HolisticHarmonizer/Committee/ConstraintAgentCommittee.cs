@@ -10,8 +10,8 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Committee;
 /// into a single committee decision. Voting rule: a swap is blocked only when at least
 /// <c>VetoCoalitionThreshold</c> agents object AND vetoes strictly outnumber approves. A lone
 /// veto is treated as a hint, not a block — the score-greedy layer downstream still rejects
-/// genuinely degrading swaps, and we do not want any single over-eager agent to starve the LLM
-/// of approved moves. Ties and all-abstain results approve the swap so the LLM gets the
+/// genuinely degrading swaps, and we do not want any single over-eager agent to starve the
+/// search of approved moves. Ties and all-abstain results approve the swap, giving it the
 /// benefit of the doubt.
 /// </summary>
 /// <param name="agents">All committee members; order is preserved in the verdicts list.</param>

@@ -3,7 +3,7 @@
 namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
-/// Why a swap proposed by the LLM was discarded by the Holistic Harmonizer hard-constraint layer.
+/// Why a proposed swap was discarded by the Holistic Harmonizer hard-constraint layer.
 /// </summary>
 public enum PlanMutationRejectionReason : byte
 {

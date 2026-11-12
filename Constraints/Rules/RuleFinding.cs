@@ -2,7 +2,7 @@
 
 /// <summary>
 /// One rule violation. Carries only ids and enums - never display names - so it can be logged, stored
-/// and sent to an LLM without leaking personal data. Observed/Limit are rule-specific: run length vs.
+/// and passed to other services without leaking personal data. Observed/Limit are rule-specific: run length vs.
 /// MaxRun, day gap vs. WithinDays, worked days in the rest window vs. FreeDays, count vs. Threshold,
 /// spread vs. MaxSpread.
 /// </summary>

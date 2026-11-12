@@ -1,6 +1,6 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
-namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Llm;
+namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
 /// Catalog of the stage-3 move intents. Each intent represents a distinct optimization angle with

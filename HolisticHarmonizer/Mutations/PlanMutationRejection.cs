@@ -4,7 +4,7 @@ namespace Klacks.ScheduleOptimizer.HolisticHarmonizer.Mutations;
 
 /// <summary>
 /// A swap proposal that was discarded along with the structured reason. Returned to the UI so
-/// the operator can inspect why the LLM's idea was rejected.
+/// the operator can inspect why a move was rejected.
 /// </summary>
 /// <param name="Swap">The swap proposal that failed validation.</param>
 /// <param name="Reason">Structured rejection cause for filtering and UI display.</param>
