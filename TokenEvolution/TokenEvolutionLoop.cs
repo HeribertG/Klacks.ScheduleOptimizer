@@ -187,7 +187,7 @@ public sealed class TokenEvolutionLoop
     /// used at most half of it; its generations stop early enough to leave the first run's end-pass time for its own end
     /// passes, and a deadline at the end of the budget covers all its phases (population, generations, end passes);
     /// without a budget it runs in full. The fitness judge keeps the better end plan, the first run's on a
-    /// tie; a deadline or cancellation inside the evolution keeps the first run's plan, one inside the end passes hands
+    /// tie, and the wheel plan only when it keeps the rank order (<see cref="WheelRunRankGuard"/>); a deadline or cancellation inside the evolution keeps the first run's plan, one inside the end passes hands
     /// the passes' plan so far to the judge. The second run reports its progress like the first and writes its trace
     /// lines with a "[wheel] " prefix, no diagnostics.
     /// </summary>
@@ -236,8 +236,12 @@ public sealed class TokenEvolutionLoop
         var evaluator = TokenFitnessEvaluator.Create(context, config);
         evaluator.Evaluate(best, context);
         evaluator.Evaluate(wheel, context);
-        var wheelWins = evaluator.Compare(wheel, best) < 0;
-        trace?.Invoke($"Run: wheel run {(wheelWins ? "wins" : "does not win")} against the first run");
+        var judgeWins = evaluator.Compare(wheel, best) < 0;
+        var keepsRankOrder = WheelRunRankGuard.Accepts(wheel, best, context);
+        var wheelWins = judgeWins && keepsRankOrder;
+        trace?.Invoke(judgeWins && !keepsRankOrder
+            ? "Run: wheel run does not win against the first run (rank order broken)"
+            : $"Run: wheel run {(wheelWins ? "wins" : "does not win")} against the first run");
         return wheelWins ? wheel : best;
     }
 
