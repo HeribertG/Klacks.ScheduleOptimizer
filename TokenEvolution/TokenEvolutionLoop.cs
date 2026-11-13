@@ -54,8 +54,10 @@ public sealed class TokenEvolutionLoop
     private const string RuinStage = "mutation.ruin";
     private const string SequenceStage = "mutation.sequence";
     private const string NoMutationStage = "mutation.none";
+    private const string WheelTracePrefix = "[wheel] ";
 
     private readonly TokenPopulationBuilder _populationBuilder;
+    private readonly TokenEvolutionLoop? _wheelLoop;
     private readonly BlockCrossover _crossover;
     private readonly TokenSwapMutation _swap;
     private readonly BlockSplitMutation _split;
@@ -81,9 +83,11 @@ public sealed class TokenEvolutionLoop
         BlockSplitMutation split,
         BlockMergeMutation merge,
         ReassignMutation reassign,
-        TokenRepair repair)
+        TokenRepair repair,
+        TokenEvolutionLoop? wheelLoop = null)
     {
         _populationBuilder = populationBuilder;
+        _wheelLoop = wheelLoop;
         _crossover = crossover;
         _swap = swap;
         _split = split;
@@ -103,6 +107,21 @@ public sealed class TokenEvolutionLoop
             new RandomTokenStrategy(),
             new WarmStartTokenStrategy(),
             new RotationTemplateTokenStrategy());
+        var wheelBuilder = new TokenPopulationBuilder(
+            new AuctionTokenStrategy(),
+            new CoverageFirstTokenStrategy(),
+            new GreedyTokenStrategy(),
+            new RandomTokenStrategy(),
+            new WarmStartTokenStrategy(),
+            new RotationWheelTokenStrategy());
+        var wheelLoop = new TokenEvolutionLoop(
+            wheelBuilder,
+            new BlockCrossover(),
+            new TokenSwapMutation(),
+            new BlockSplitMutation(),
+            new BlockMergeMutation(),
+            new ReassignMutation(),
+            new TokenRepair(realChecker));
         return new TokenEvolutionLoop(
             builder,
             new BlockCrossover(),
@@ -110,7 +129,8 @@ public sealed class TokenEvolutionLoop
             new BlockSplitMutation(),
             new BlockMergeMutation(),
             new ReassignMutation(),
-            new TokenRepair(realChecker));
+            new TokenRepair(realChecker),
+            wheelLoop);
     }
 
     /// <summary>
@@ -152,10 +172,73 @@ public sealed class TokenEvolutionLoop
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var evolved = Evolve(
             context, config, progress, cancellationToken, trace, blockDiagnostics, repairEscalations, packageDiagnostics);
+        var evolveElapsed = sw.Elapsed;
         var best = ApplyFinalPasses(evolved, context, config, trace, cancellationToken);
+        best = ChooseWheelRun(best, context, config, sw.Elapsed, sw.Elapsed - evolveElapsed, progress, cancellationToken, trace);
         trace?.Invoke($"Run: total {sw.ElapsedMilliseconds}ms");
         ShortPackageTrace.ReportCount(packageDiagnostics, FinalPlanLabel, best, context);
         return best;
+    }
+
+    /// <summary>
+    /// Second run with the rotation wheel as a start plan ("two runs, the judge chooses"): only when a wheel loop is
+    /// wired, a <see cref="RotationWheel"/> applies to the context and the run was not cancelled. The first run is
+    /// today's run, unchanged and never shortened. With a soft time budget the second run only starts when the first one
+    /// used at most half of it; its generations stop early enough to leave the first run's end-pass time for its own end
+    /// passes, and a deadline at the end of the budget covers all its phases (population, generations, end passes);
+    /// without a budget it runs in full. The fitness judge keeps the better end plan, the first run's on a
+    /// tie; a deadline or cancellation inside the evolution keeps the first run's plan, one inside the end passes hands
+    /// the passes' plan so far to the judge. The second run reports its progress like the first and writes its trace
+    /// lines with a "[wheel] " prefix, no diagnostics.
+    /// </summary>
+    private CoreScenario ChooseWheelRun(
+        CoreScenario best,
+        CoreWizardContext context,
+        TokenEvolutionConfig config,
+        TimeSpan elapsed,
+        TimeSpan finalPassesReserve,
+        IProgress<TokenEvolutionProgress>? progress,
+        CancellationToken cancellationToken,
+        Action<string>? trace)
+    {
+        if (_wheelLoop is null || cancellationToken.IsCancellationRequested || RotationWheel.Build(context) is null)
+        {
+            return best;
+        }
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var wheelConfig = config;
+        if (config.MaxRuntime is { } budget)
+        {
+            if (elapsed + elapsed > budget)
+            {
+                trace?.Invoke($"Run: wheel run skipped, the first run used {elapsed.TotalSeconds:F0}s of {budget.TotalSeconds:F0}s");
+                return best;
+            }
+
+            wheelConfig = config with { MaxRuntime = budget - elapsed - finalPassesReserve };
+            deadline.CancelAfter(budget - elapsed);
+        }
+
+        Action<string>? wheelTrace = trace is null ? null : message => trace(WheelTracePrefix + message);
+        CoreScenario wheel;
+        try
+        {
+            var evolved = _wheelLoop.Evolve(context, wheelConfig, progress, deadline.Token, wheelTrace);
+            wheel = _wheelLoop.ApplyFinalPasses(evolved, context, wheelConfig, wheelTrace, deadline.Token);
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            trace?.Invoke("Run: wheel run stopped by the deadline or a cancellation, the first run's plan stays");
+            return best;
+        }
+
+        var evaluator = TokenFitnessEvaluator.Create(context, config);
+        evaluator.Evaluate(best, context);
+        evaluator.Evaluate(wheel, context);
+        var wheelWins = evaluator.Compare(wheel, best) < 0;
+        trace?.Invoke($"Run: wheel run {(wheelWins ? "wins" : "does not win")} against the first run");
+        return wheelWins ? wheel : best;
     }
 
     /// <summary>
