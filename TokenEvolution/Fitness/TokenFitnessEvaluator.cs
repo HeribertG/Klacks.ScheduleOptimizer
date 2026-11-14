@@ -580,7 +580,7 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// the auction, coverage strategy and repair carries its own fresh BlockId. A day is one unit: two shifts on one day
     /// are a permitted split duty, not a rotation step.
     /// </summary>
-    private double ComputeBlockOrderingScore(CoreScenario scenario, CoreWizardContext context)
+    internal double ComputeBlockOrderingScore(CoreScenario scenario, CoreWizardContext context)
     {
         var shiftWorkers = new HashSet<string>(StringComparer.Ordinal);
         foreach (var agent in context.Agents)
@@ -733,18 +733,22 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
     /// 1 - min(1, stddev of the shares); the result is the mean over the kinds that exist.
     /// </summary>
     internal double ComputeShiftKindFairnessScore(CoreScenario scenario, CoreWizardContext context)
+        => ComputeShiftKindFairnessScore(CountShiftKinds(scenario.Tokens), context);
+
+    /// <summary>
+    /// The same evenness score read from token counts per shift kind and agent instead of a plan, so a caller that
+    /// knows how a move changes the counts can price it without building the plan. Same arithmetic in the same
+    /// order as the plan overload, so both return the identical value for the same counts.
+    /// </summary>
+    /// <param name="countsByKindAndAgent">Token count per (shift kind, agent id); a missing key counts as zero</param>
+    /// <param name="context">Wizard context supplying the eligible days per kind and agent</param>
+    internal double ComputeShiftKindFairnessScore(
+        IReadOnlyDictionary<(int Kind, string AgentId), int> countsByKindAndAgent, CoreWizardContext context)
     {
         var eligibleDaysByKind = GetKindEligibility(context);
         if (eligibleDaysByKind.Count == 0)
         {
             return 1;
-        }
-
-        var countsByKindAndAgent = new Dictionary<(int Kind, string AgentId), int>();
-        foreach (var token in scenario.Tokens)
-        {
-            var key = (token.ShiftTypeIndex, token.AgentId);
-            countsByKindAndAgent[key] = countsByKindAndAgent.GetValueOrDefault(key, 0) + 1;
         }
 
         double scoreSum = 0;
@@ -772,6 +776,20 @@ public sealed class TokenFitnessEvaluator : IComparer<CoreScenario>
         }
 
         return kinds == 0 ? 1 : scoreSum / kinds;
+    }
+
+    /// <summary>Token count per (shift kind, agent id) of the given tokens, the input of the counts-based fairness score.</summary>
+    /// <param name="tokens">Tokens to count</param>
+    internal static Dictionary<(int Kind, string AgentId), int> CountShiftKinds(IEnumerable<CoreToken> tokens)
+    {
+        var countsByKindAndAgent = new Dictionary<(int Kind, string AgentId), int>();
+        foreach (var token in tokens)
+        {
+            var key = (token.ShiftTypeIndex, token.AgentId);
+            countsByKindAndAgent[key] = countsByKindAndAgent.GetValueOrDefault(key, 0) + 1;
+        }
+
+        return countsByKindAndAgent;
     }
 
     /// <summary>

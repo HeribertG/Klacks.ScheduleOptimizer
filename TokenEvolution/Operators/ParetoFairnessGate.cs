@@ -91,6 +91,27 @@ public static class ParetoFairnessGate
     }
 
     /// <summary>
+    /// The most favourable snapshot a candidate with the given known components can have: every component not
+    /// yet measured takes the value that <see cref="Accepts(ParetoGateSnapshot, ParetoGateSnapshot, ParetoGateSnapshot)"/>
+    /// rewards most — the current plan's value for the hard components, zero short packages. Accepts is monotone in
+    /// each component, so when it refuses this best case it refuses the real candidate as well, and the full
+    /// evaluation can be skipped. Pass <see cref="double.PositiveInfinity"/> as block order while it is not measured.
+    /// </summary>
+    /// <param name="current">Snapshot of the plan the swap starts from</param>
+    /// <param name="shiftKindFairness">Measured shift-kind fairness of the candidate</param>
+    /// <param name="blockOrder">Measured block order of the candidate, or positive infinity when unknown</param>
+    /// <param name="mixedPackages">Measured mixed-package count of the candidate</param>
+    public static ParetoGateSnapshot BestCaseOf(
+        ParetoGateSnapshot current, double shiftKindFairness, double blockOrder, int mixedPackages)
+        => current with
+        {
+            BlockOrder = blockOrder,
+            ShiftKindFairness = shiftKindFairness,
+            MixedPackages = mixedPackages,
+            ShortPackages = 0,
+        };
+
+    /// <summary>
     /// True when the candidate raises the shift-kind fairness without moving any numbered rule from 1
     /// to 8 the wrong way. Kept as the strict single-step form for callers without an origin plan;
     /// equivalent to the three-snapshot overload with the current plan as its own origin.
@@ -106,6 +127,8 @@ public static class ParetoFairnessGate
     /// plan is large enough to buy the candidate's cumulative rule-7/8 regression within the trade
     /// bounds. Hard components always compare against the CURRENT plan and stay monotonic; the two
     /// tradable ones compare against the ORIGIN plan so the allowance cannot compound over a chain.
+    /// The check is monotone in every component of the candidate (each one only enters as "at least as good as" a bound);
+    /// <see cref="BestCaseOf"/> relies on that, so a change here must keep it or adjust the best case.
     /// </summary>
     /// <param name="origin">Snapshot of the plan the balancer run started from; owns the trade budget</param>
     /// <param name="current">Snapshot of the plan the swap starts from</param>

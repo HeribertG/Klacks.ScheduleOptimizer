@@ -1,6 +1,7 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.TokenEvolution.Diagnostics;
 using Klacks.ScheduleOptimizer.TokenEvolution.Fitness;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution.Operators;
@@ -72,22 +73,27 @@ public sealed class ShiftKindBalancer
         var stats = diagnostics is null ? null : new BalanceDiagnostics();
         var origin = ParetoFairnessGate.SnapshotOf(scenario, context, evaluator);
         var current = scenario;
+        var currentSnapshot = origin;
         for (var i = 0; i < MaxSwaps; i++)
         {
-            var swapped = FindImprovingSwap(origin, current, context, evaluator, stats);
+            var swapped = FindImprovingSwap(origin, current, currentSnapshot, context, evaluator, stats);
             if (swapped is null)
             {
                 break;
             }
 
-            current = swapped;
+            (current, currentSnapshot) = swapped.Value;
         }
 
         stats?.Report(diagnostics!);
         return current;
     }
 
-    /// <summary>Rejection census of one balancer invocation; only built when a sink listens.</summary>
+    /// <summary>
+    /// Rejection census of one balancer invocation; only built when a sink listens. The counters follow the check order
+    /// of <see cref="FindImprovingSwap"/>: a pair is counted at the first check that drops it, so a pair without fairness
+    /// gain is never offered to the slot filter, and a partial swap refused on its best case carries no full-gate reason.
+    /// </summary>
     private sealed class BalanceDiagnostics
     {
         private const int MaxDetailLines = 12;
@@ -95,6 +101,7 @@ public sealed class ShiftKindBalancer
         public int OverlappingPairs;
         public int FilteredBySlotGuard;
         public int NoFairnessGain;
+        public int RejectedByBestCase;
         public int Rejected;
         public int Accepted;
         public readonly List<string> Details = [];
@@ -111,7 +118,8 @@ public sealed class ShiftKindBalancer
         {
             sink(
                 $"BALANCE pairs={OverlappingPairs} slotFiltered={FilteredBySlotGuard} "
-                + $"noFairnessGain={NoFairnessGain} rejected={Rejected} accepted={Accepted}");
+                + $"noFairnessGain={NoFairnessGain} rejectedByBestCase={RejectedByBestCase} rejected={Rejected} "
+                + $"accepted={Accepted}");
             foreach (var line in Details)
             {
                 sink($"BALANCE reject {line}");
@@ -165,15 +173,21 @@ public sealed class ShiftKindBalancer
     private const int MaxMixedPackagesTradeIncrease = ParetoFairnessGate.MaxMixedPackagesTradeIncrease;
     private const int MaxShortPackagesTradeIncrease = ParetoFairnessGate.MaxShortPackagesTradeIncrease;
 
-    private static CoreScenario? FindImprovingSwap(
+    /// <summary>
+    /// First improving swap in roster and block order, with the gate snapshot of the plan it produces; null when no
+    /// candidate qualifies. The checks run cheapest first: fairness from the kind counts, then the slot filter on the
+    /// built plan, then for a partial swap the gate on its best case. Each of them only skips a candidate the full
+    /// gate refuses as well, so the first accepted candidate is the one a full check of every pair would accept.
+    /// </summary>
+    private static (CoreScenario Plan, ParetoGateSnapshot Snapshot)? FindImprovingSwap(
         ParetoGateSnapshot origin,
         CoreScenario scenario,
+        ParetoGateSnapshot current,
         CoreWizardContext context,
         TokenFitnessEvaluator evaluator,
         BalanceDiagnostics? stats)
     {
-        var current = ParetoFairnessGate.SnapshotOf(scenario, context, evaluator);
-        var currentKindFairness = current.ShiftKindFairness;
+        var kindCounts = TokenFitnessEvaluator.CountShiftKinds(scenario.Tokens);
         var blocksByAgent = new Dictionary<string, List<KindBlock>>(StringComparer.Ordinal);
         foreach (var agent in context.Agents)
         {
@@ -205,6 +219,17 @@ public sealed class ShiftKindBalancer
                             stats.OverlappingPairs++;
                         }
 
+                        var fairness = FairnessAfterExchange(
+                            kindCounts, agentA.Id, blockA.Kind, agentB.Id, blockB.Kind, fromA.Count, context, evaluator);
+                        if (fairness <= current.ShiftKindFairness)
+                        {
+                            if (stats is not null)
+                            {
+                                stats.NoFairnessGain++;
+                            }
+                            continue;
+                        }
+
                         var candidate = KindBlockSwap.TrySwap(
                             scenario, context, agentA, fromA, agentB, fromB);
                         if (candidate is null)
@@ -216,11 +241,14 @@ public sealed class ShiftKindBalancer
                             continue;
                         }
 
-                        if (evaluator.ComputeShiftKindFairnessScore(candidate, context) <= currentKindFairness)
+                        if (!coversBoth && !BestCasePassesGate(origin, current, candidate, fairness, context, evaluator))
                         {
                             if (stats is not null)
                             {
-                                stats.NoFairnessGain++;
+                                stats.RejectedByBestCase++;
+                                stats.Detail(
+                                    $"{agentA.Id}[{blockA.Kind}]x{agentB.Id}[{blockB.Kind}] "
+                                    + $"days={fromA.Count} coversBoth={coversBoth} refusedOnBestCase");
                             }
                             continue;
                         }
@@ -236,7 +264,7 @@ public sealed class ShiftKindBalancer
                             {
                                 stats.Accepted++;
                             }
-                            return candidate;
+                            return (candidate, proposed);
                         }
 
                         if (stats is not null)
@@ -253,5 +281,61 @@ public sealed class ShiftKindBalancer
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Shift-kind fairness of the plan after the two agents exchange <paramref name="days"/> tokens of their two
+    /// kinds, read from the kind counts of the current plan. The swap re-owns the tokens and keeps their kinds, so
+    /// this is the fairness of the plan <see cref="KindBlockSwap.TrySwap"/> would build. The counts are shifted for
+    /// the reading and restored before returning.
+    /// </summary>
+    internal static double FairnessAfterExchange(
+        Dictionary<(int Kind, string AgentId), int> kindCounts,
+        string agentA,
+        int kindA,
+        string agentB,
+        int kindB,
+        int days,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator)
+    {
+        Shift(kindCounts, kindA, agentA, -days);
+        Shift(kindCounts, kindB, agentA, days);
+        Shift(kindCounts, kindB, agentB, -days);
+        Shift(kindCounts, kindA, agentB, days);
+        var fairness = evaluator.ComputeShiftKindFairnessScore(kindCounts, context);
+        Shift(kindCounts, kindA, agentA, days);
+        Shift(kindCounts, kindB, agentA, -days);
+        Shift(kindCounts, kindB, agentB, days);
+        Shift(kindCounts, kindA, agentB, -days);
+        return fairness;
+
+        static void Shift(Dictionary<(int Kind, string AgentId), int> counts, int kind, string agentId, int delta)
+            => counts[(kind, agentId)] = counts.GetValueOrDefault((kind, agentId), 0) + delta;
+    }
+
+    /// <summary>
+    /// False when the gate refuses the partial swap even with every unmeasured component at its best value, which
+    /// settles the refusal without the full evaluation. The mixed-package count is read first, the block order only
+    /// when the count alone does not refuse.
+    /// </summary>
+    private static bool BestCasePassesGate(
+        ParetoGateSnapshot origin,
+        ParetoGateSnapshot current,
+        CoreScenario candidate,
+        double fairness,
+        CoreWizardContext context,
+        TokenFitnessEvaluator evaluator)
+    {
+        var mixedPackages = MixedKindPackageTrace.Count(candidate);
+        var withoutBlockOrder = ParetoFairnessGate.BestCaseOf(current, fairness, double.PositiveInfinity, mixedPackages);
+        if (!ParetoFairnessGate.Accepts(origin, current, withoutBlockOrder))
+        {
+            return false;
+        }
+
+        var blockOrder = evaluator.ComputeBlockOrderingScore(candidate, context);
+        return ParetoFairnessGate.Accepts(
+            origin, current, ParetoFairnessGate.BestCaseOf(current, fairness, blockOrder, mixedPackages));
     }
 }
