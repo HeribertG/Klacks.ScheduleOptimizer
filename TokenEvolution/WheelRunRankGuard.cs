@@ -1,19 +1,27 @@
 // Copyright (c) Heribert Gasparoli. SPDX-License-Identifier: AGPL-3.0-only
 
 using Klacks.ScheduleOptimizer.Models;
+using Klacks.ScheduleOptimizer.Objective;
 
 namespace Klacks.ScheduleOptimizer.TokenEvolution;
 
 /// <summary>
-/// Rank-order check for the wheel run of Wizard 1: the wheel plan may only replace the first run's plan when no lower
-/// rank ends more than <see cref="ToleranceHours"/> above the lowest planned hours of all ranks above it, or when its
-/// largest such excess is not larger than the first run's own. The tolerance is the step a plan of whole shifts moves
-/// in, the same band the scenario assertion A6 of the autofill suite uses. Placeholders are left out.
+/// Rank-order check for the wheel run of Wizard 1. Every person is measured by the share of the guaranteed hours the plan
+/// credits (hours before the period, planned hours with surcharges, absence hours inside the period; the Stage-1 rule of
+/// the fitness), so part-time contracts and absences compare fairly. The wheel plan may only replace the first run's plan
+/// when no lower rank is ahead of a higher rank by more than <see cref="ToleranceShifts"/> typical shift, counted in the
+/// higher rank's hours, or when its largest such lead is not larger than the first run's own. The typical shift is the
+/// median length of the period's shifts. Placeholders, people without guaranteed hours and people without shift work are
+/// left out.
 /// </summary>
 public static class WheelRunRankGuard
 {
-    /// <summary>Hours a lower rank may end above the weakest rank above it.</summary>
-    public const double ToleranceHours = 8;
+    /// <summary>Typical shifts by which a lower rank may be ahead of a higher rank.</summary>
+    public const double ToleranceShifts = 1;
+
+    private const int MedianDivisor = 2;
+
+    private const double ComparisonEpsilon = 1e-9;
 
     /// <summary>True when the wheel plan keeps the rank order as defined above.</summary>
     /// <param name="wheel">End plan of the wheel run</param>
@@ -22,34 +30,57 @@ public static class WheelRunRankGuard
     public static bool Accepts(CoreScenario wheel, CoreScenario first, CoreWizardContext context)
     {
         var excess = LargestExcess(wheel, context);
-        return excess <= ToleranceHours || excess <= LargestExcess(first, context);
+        return excess <= ToleranceShifts + ComparisonEpsilon || excess <= LargestExcess(first, context) + ComparisonEpsilon;
     }
 
     /// <summary>
-    /// Largest number of planned hours by which a rank exceeds the lowest planned hours of all ranks above it (0 when
-    /// none does), counting the plan's work inside the period.
+    /// Largest lead of a lower rank over a higher rank, in typical shifts of the higher rank: (credited share of the lower
+    /// rank − credited share of the higher rank) × guaranteed hours of the higher rank / typical shift length. 0 when no
+    /// lower rank is ahead or the period has no shifts.
     /// </summary>
     /// <param name="plan">Plan to measure</param>
     /// <param name="context">Context whose agent order is the rank order</param>
     public static double LargestExcess(CoreScenario plan, CoreWizardContext context)
     {
-        var hours = plan.Tokens
+        var typicalShift = TypicalShiftHours(context);
+        if (typicalShift <= 0)
+        {
+            return 0;
+        }
+
+        var planned = plan.Tokens
             .Where(t => t.Date >= context.PeriodFrom && t.Date <= context.PeriodUntil)
             .GroupBy(t => t.AgentId, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => (double)g.Sum(t => t.TotalHours), StringComparer.Ordinal);
-        var largest = 0d;
-        var lowestAbove = double.MaxValue;
-        foreach (var agent in context.Agents.Where(a => !a.IsStandIn))
-        {
-            var planned = hours.GetValueOrDefault(agent.Id);
-            if (lowestAbove != double.MaxValue)
-            {
-                largest = Math.Max(largest, planned - lowestAbove);
-            }
+            .ToDictionary(g => g.Key, g => g.Sum(t => (double)(t.TotalHours + t.Surcharges)), StringComparer.Ordinal);
+        var absence = CanonicalHours.BreakHoursByAgent(context);
+        var ranked = context.Agents
+            .Where(a => !a.IsStandIn && a.PerformsShiftWork && a.GuaranteedHours > 0)
+            .Select(a => (Target: a.GuaranteedHours,
+                Share: (a.CurrentHours + planned.GetValueOrDefault(a.Id) + absence.GetValueOrDefault(a.Id)) / a.GuaranteedHours))
+            .ToList();
 
-            lowestAbove = Math.Min(lowestAbove, planned);
+        var largest = 0d;
+        for (var lower = 1; lower < ranked.Count; lower++)
+        {
+            for (var higher = 0; higher < lower; higher++)
+            {
+                var lead = (ranked[lower].Share - ranked[higher].Share) * ranked[higher].Target / typicalShift;
+                largest = Math.Max(largest, lead);
+            }
         }
 
         return largest;
+    }
+
+    private static double TypicalShiftHours(CoreWizardContext context)
+    {
+        var lengths = context.Shifts.Where(s => s.Hours > 0).Select(s => s.Hours).Order().ToArray();
+        if (lengths.Length == 0)
+        {
+            return 0;
+        }
+
+        var middle = lengths.Length / MedianDivisor;
+        return lengths.Length % MedianDivisor == 1 ? lengths[middle] : (lengths[middle - 1] + lengths[middle]) / MedianDivisor;
     }
 }
