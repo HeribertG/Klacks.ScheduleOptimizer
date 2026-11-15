@@ -41,6 +41,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Conductor;
 /// planning-rule check, identical to the behaviour before planning rules existed.
 /// </param>
 /// <param name="keywordMode">Keyword mode of the run (BitmapInput.KeywordMode); Hard by default.</param>
+/// <param name="outsideGroupAssignments">
+/// Optional subset of <paramref name="ineligibleAssignments"/> vetoed for a missing group membership on the day; only selects
+/// <see cref="OutsideGroupReasonFormat"/> instead of <see cref="NotQualifiedReasonFormat"/>.
+/// </param>
 public sealed class DomainAwareReplaceValidator : IReplaceValidator
 {
     /// <summary>Reason of a refused duty for an agent without shift work: {0} role label, {1} agent name, {2} symbol.</summary>
@@ -49,9 +53,16 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
     /// <summary>Reason of a refused duty over the daily cap: {0} rule name, {1} day hours, {2} date, {3} cap.</summary>
     public const string MaxDailyHoursReasonFormat = "{0} exceeded: day total would be {1:F1}h on {2:yyyy-MM-dd}, cap is {3}h";
 
+    /// <summary>Reason of a refused duty without a mandatory qualification: {0} role label, {1} agent name, {2} symbol, {3} date.</summary>
+    public const string NotQualifiedReasonFormat = "{0} {1} not qualified for shift {2} on {3:yyyy-MM-dd}";
+
+    /// <summary>Reason of a refused duty for a non-member of the shift's group: {0} role label, {1} agent name, {2} symbol, {3} date.</summary>
+    public const string OutsideGroupReasonFormat = "{0} {1} not a member of the group of shift {2} on {3:yyyy-MM-dd}";
+
     private readonly IReadOnlyDictionary<(string AgentId, DateOnly Date), DayAvailability> _availability;
     private readonly Dictionary<(string AgentId, DateOnly Date), BitmapAssignment> _boundaryByKey;
     private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _ineligibleAssignments;
+    private readonly IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)> _outsideGroupAssignments;
     private readonly BitmapWeeklyRestDayGuard _weeklyRestDays;
     private readonly PlanningRuleMoveGuard? _planningRules;
     private readonly KeywordMode _keywordMode;
@@ -61,12 +72,14 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
         IReadOnlyList<BitmapAssignment>? boundaryAssignments = null,
         IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? ineligibleAssignments = null,
         PlanningRuleMoveGuard? planningRules = null,
-        KeywordMode keywordMode = KeywordMode.Hard)
+        KeywordMode keywordMode = KeywordMode.Hard,
+        IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? outsideGroupAssignments = null)
     {
         _planningRules = planningRules;
         _keywordMode = keywordMode;
         _availability = availability ?? new Dictionary<(string, DateOnly), DayAvailability>();
         _ineligibleAssignments = ineligibleAssignments ?? new HashSet<(string, Guid, DateOnly)>();
+        _outsideGroupAssignments = outsideGroupAssignments ?? new HashSet<(string, Guid, DateOnly)>();
         _boundaryByKey = new Dictionary<(string, DateOnly), BitmapAssignment>();
         _weeklyRestDays = new BitmapWeeklyRestDayGuard(boundaryAssignments);
         if (boundaryAssignments is not null)
@@ -90,12 +103,13 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
             input.BoundaryAssignments,
             input.IneligibleAssignments,
             planningRules is { HasHardRules: true } ? new PlanningRuleMoveGuard(planningRules) : null,
-            input.KeywordMode);
+            input.KeywordMode,
+            input.OutsideGroupAssignments);
     }
 
     /// <summary>
     /// Returns null if the agent may receive the incoming cell's shift on the date, otherwise a short
-    /// reason. A missing mandatory qualification is a hard blocker. Public so Wizard 3's
+    /// reason. A missing mandatory qualification or group membership is a hard blocker. Public so Wizard 3's
     /// PlanMutationValidator can apply the same check on its cross-day branch (which does not delegate
     /// to <see cref="DiagnoseReceivingSide"/>). With an empty ineligible set this is always null.
     /// </summary>
@@ -108,7 +122,8 @@ public sealed class DomainAwareReplaceValidator : IReplaceValidator
 
         if (_ineligibleAssignments.Contains((agentId, shiftId, date)))
         {
-            return $"{roleLabel} {displayName} not qualified for shift {incomingCell.Symbol} on {date:yyyy-MM-dd}";
+            var format = _outsideGroupAssignments.Contains((agentId, shiftId, date)) ? OutsideGroupReasonFormat : NotQualifiedReasonFormat;
+            return string.Format(CultureInfo.InvariantCulture, format, roleLabel, displayName, incomingCell.Symbol, date);
         }
 
         return null;

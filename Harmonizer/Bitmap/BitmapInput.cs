@@ -38,6 +38,10 @@ namespace Klacks.ScheduleOptimizer.Harmonizer.Bitmap;
 /// True when <paramref name="Agents"/> already holds the roster priority order (the API ranks once for every wizard
 /// stage); the row sorter then only moves the stand-ins last and keeps the rest. False (default) lets the row sorter rank.
 /// </param>
+/// <param name="OutsideGroupAssignments">
+/// Optional subset of <paramref name="IneligibleAssignments"/>: the triples vetoed because the agent is not a member of the
+/// shift's group on that day. Only picks the rejection reason; the veto itself comes from IneligibleAssignments.
+/// </param>
 public sealed record BitmapInput(
     IReadOnlyList<BitmapAgent> Agents,
     DateOnly StartDate,
@@ -50,4 +54,5 @@ public sealed record BitmapInput(
     IReadOnlyList<CoreRestrictedTimeWindow>? RestrictedTimeWindows = null,
     BitmapPlanningRules? Rules = null,
     KeywordMode KeywordMode = KeywordMode.Hard,
-    bool KeepAgentOrder = false);
+    bool KeepAgentOrder = false,
+    IReadOnlySet<(string AgentId, Guid ShiftId, DateOnly Date)>? OutsideGroupAssignments = null);
